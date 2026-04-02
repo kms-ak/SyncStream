@@ -2,96 +2,56 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>SYNC_STREAM // OPERATOR_INTERFACE_v3.0</title>
+    <title>SYNC_STREAM // CORE_LINK_v3.2</title>
     <script src="https://cdn.jsdelivr.net/npm/ably@1/ably.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;500;700&family=Syncopate:wght@700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;700&family=Syncopate:wght@700&display=swap" rel="stylesheet">
     <style>
-        :root {
-            --neon: #00f2ff; --bg: #050507; --panel: #0d0d12;
-            --border: #1a1a24; --text: #e0e0e6; --dim: #606070;
-        }
+        :root { --neon: #00f2ff; --bg: #0a0a0c; --panel: #111116; --border: #1e1e26; --text: #a0a0b0; }
         * { box-sizing: border-box; margin: 0; padding: 0; cursor: crosshair; }
-        body { 
-            background: var(--bg); color: var(--text); font-family: 'Space Grotesk', sans-serif;
-            background-image: radial-gradient(circle at 50% 50%, #111 0%, #050507 100%);
-            min-height: 100vh; overflow-x: hidden;
-        }
-
-        /* Terminal Overlay */
-        #auth-overlay {
-            position: fixed; inset: 0; z-index: 1000;
-            background: var(--bg); display: flex; align-items: center; justify-content: center;
-        }
-        .auth-box {
-            border: 1px solid var(--neon); padding: 40px; width: 400px;
-            background: var(--panel); box-shadow: 0 0 50px rgba(0, 242, 255, 0.05);
-            text-align: center;
-        }
-
-        /* Layout */
+        body { background: var(--bg); color: var(--text); font-family: 'Fira Code', monospace; }
+        #auth-overlay { position: fixed; inset: 0; z-index: 9999; background: var(--bg); display: flex; align-items: center; justify-content: center; }
+        .auth-card { border: 1px solid var(--neon); padding: 40px; width: 400px; background: var(--panel); text-align: center; }
         header { padding: 20px 40px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
-        .logo { font-family: 'Syncopate', sans-serif; color: var(--neon); letter-spacing: 4px; font-size: 0.9rem; }
-        
-        main { max-width: 1200px; margin: 0 auto; padding: 40px 20px; }
-        
-        .search-container { display: flex; gap: 15px; margin-bottom: 40px; }
-        input { 
-            flex: 1; padding: 15px; background: #000; border: 1px solid var(--border); 
-            color: var(--neon); border-radius: 4px; outline: none; font-family: inherit;
-        }
-        input:focus { border-color: var(--neon); box-shadow: 0 0 10px rgba(0, 242, 255, 0.2); }
-
-        .btn { 
-            padding: 15px 30px; border: 1px solid var(--neon); background: transparent; 
-            color: var(--neon); text-transform: uppercase; font-weight: bold; 
-            letter-spacing: 2px; transition: 0.3s; border-radius: 4px;
-        }
-        .btn:hover { background: var(--neon); color: #000; box-shadow: 0 0 20px var(--neon); }
-
-        /* Video Area */
-        #player-wrapper { display: none; margin-bottom: 40px; border: 1px solid var(--border); background: #000; padding: 10px; }
+        .logo { font-family: 'Syncopate', sans-serif; color: var(--neon); letter-spacing: 4px; font-size: 0.8rem; }
+        main { max-width: 1100px; margin: 0 auto; padding: 40px 20px; }
+        input { width: 100%; padding: 12px; background: #000; border: 1px solid var(--border); color: var(--neon); margin-bottom: 15px; outline: none; }
+        .btn { padding: 15px; border: 1px solid var(--neon); background: transparent; color: var(--neon); text-transform: uppercase; font-weight: bold; cursor: pointer; }
+        .btn:hover { background: var(--neon); color: #000; box-shadow: 0 0 15px var(--neon); }
+        #player-wrapper { display: none; margin-bottom: 40px; border: 1px solid var(--border); padding: 10px; background: #000; }
         #yt-player { width: 100%; aspect-ratio: 16/9; }
-
-        /* Results Grid */
-        .results-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 25px; }
-        .movie-card { 
-            background: var(--panel); border: 1px solid var(--border); 
-            transition: 0.4s; position: relative; overflow: hidden;
-        }
-        .movie-card:hover { border-color: var(--neon); transform: translateY(-10px); }
-        .movie-card img { width: 100%; display: block; opacity: 0.8; }
-        .movie-card:hover img { opacity: 1; }
-        .card-info { padding: 12px; font-size: 0.75rem; border-top: 1px solid var(--border); }
-        .card-title { font-weight: 700; margin-bottom: 4px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .results-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 20px; margin-top: 30px; }
+        .movie-card { background: var(--panel); border: 1px solid var(--border); cursor: pointer; transition: 0.3s; }
+        .movie-card:hover { border-color: var(--neon); }
+        .movie-card img { width: 100%; display: block; opacity: 0.7; }
     </style>
 </head>
 <body>
 
 <div id="auth-overlay">
-    <div class="auth-box">
-        <h2 style="margin-bottom:20px; color:var(--neon)">SYSTEM_BOOT</h2>
-        <input type="text" id="user-name" placeholder="OPERATOR_ID">
-        <input type="text" id="room-code" placeholder="SECTOR_LINK">
-        <button class="btn" style="width:100%" onclick="app.init()">Initialize Link</button>
+    <div class="auth-card">
+        <h2 style="color:var(--neon); margin-bottom:20px;">SYSTEM_LOGIN</h2>
+        <input type="text" id="user-in" placeholder="OPERATOR_ID">
+        <input type="text" id="room-in" placeholder="SECTOR_CODE">
+        <button class="btn" style="width:100%" onclick="app.init()">Initialize</button>
     </div>
 </div>
 
 <header>
-    <div class="logo">SYNC_STREAM // v3.0</div>
-    <div id="status" style="font-size: 0.7rem; color: var(--dim);">STATUS: DISCONNECTED</div>
+    <div class="logo">SYNC_STREAM // VX-PRO</div>
+    <div id="status" style="font-size:0.7rem;">STATUS: OFFLINE</div>
 </header>
 
 <main>
-    <div class="search-container">
-        <input type="text" id="search-q" placeholder="QUERY_TMDB_DATABASE..." onkeydown="if(event.key==='Enter')app.search()">
-        <button class="btn" onclick="app.search()">Query</button>
+    <div style="display:flex; gap:10px; margin-bottom:30px;">
+        <input id="query" placeholder="QUERY_ARCHIVE..." style="margin:0">
+        <button class="btn" style="width:150px;" onclick="app.search()">Search</button>
     </div>
 
     <div id="player-wrapper">
         <div id="yt-player"></div>
-        <div style="display: flex; gap: 10px; margin-top: 15px; padding: 10px;">
-            <button class="btn" style="flex:1" onclick="app.sync('PLAY')">UNHALT_STREAM</button>
-            <button class="btn" style="flex:1; border-color:#333; color:#555;" onclick="app.sync('PAUSE')">HALT_BUFFER</button>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:15px;">
+            <button class="btn" onclick="app.sync('PLAY')">UNHALT_STREAM</button>
+            <button class="btn" style="border-color:#333; color:#555;" onclick="app.sync('PAUSE')">HALT_SYSTEM</button>
         </div>
     </div>
 
@@ -105,15 +65,18 @@
         YOUTUBE_KEY: '%%YOUTUBE_KEY%%'
     };
 
-    let player;
-    function onYouTubeIframeAPIReady() { console.log("YT_API_LOADED"); }
+    var player;
+    var tag = document.createElement('script');
+    tag.src = "https://www.youtube.com/iframe_api";
+    document.head.appendChild(tag);
 
     const app = {
         state: { user: '', room: '', channel: null },
 
         init() {
-            this.state.user = document.getElementById('user-name').value || 'ADMIN';
-            this.state.room = document.getElementById('room-code').value.toUpperCase() || 'CORE';
+            this.state.user = document.getElementById('user-in').value || 'USER_' + Math.floor(Math.random()*1000);
+            this.state.room = document.getElementById('room-in').value.toUpperCase().trim();
+            if(!this.state.room) return alert("REQUIRED: SECTOR_CODE");
             document.getElementById('auth-overlay').style.display = 'none';
             this.connect();
         },
@@ -121,13 +84,16 @@
         connect() {
             const ably = new Ably.Realtime({ key: CONFIG.ABLY_KEY });
             this.state.channel = ably.channels.get(`stream-${this.state.room}`);
-            this.state.channel.subscribe('sync', m => this.handleRemote(m.data));
-            document.getElementById('status').innerText = `STATUS: LINKED_TO_${this.state.room}`;
+            this.state.channel.subscribe('sync', m => {
+                console.log(">> SIGNAL RECEIVED:", m.data);
+                this.handleRemote(m.data);
+            });
+            document.getElementById('status').innerText = `LINKED: ${this.state.room}`;
             document.getElementById('status').style.color = 'var(--neon)';
         },
 
         async search() {
-            const q = document.getElementById('search-q').value;
+            const q = document.getElementById('query').value;
             const res = await fetch(`https://api.themoviedb.org/3/search/movie?api_key=${CONFIG.TMDB_KEY}&query=${encodeURIComponent(q)}`);
             const data = await res.json();
             this.renderResults(data.results);
@@ -136,67 +102,65 @@
         renderResults(movies) {
             const out = document.getElementById('results');
             out.innerHTML = '';
-            movies.slice(0, 10).forEach(m => {
+            movies.slice(0, 8).forEach(m => {
                 if(!m.poster_path) return;
                 const div = document.createElement('div');
                 div.className = 'movie-card';
-                div.innerHTML = `
-                    <img src="https://image.tmdb.org/t/p/w500${m.poster_path}">
-                    <div class="card-info">
-                        <div class="card-title">${m.title}</div>
-                        <div style="color:var(--dim)">${m.release_date ? m.release_date.split('-')[0] : 'N/A'}</div>
-                    </div>
-                `;
-                div.onclick = () => this.fetchYouTubeId(m.title, m.id);
+                div.innerHTML = `<img src="https://image.tmdb.org/t/p/w500${m.poster_path}">`;
+                div.onclick = () => this.fetchVideo(m.title, m.id);
                 out.appendChild(div);
             });
         },
 
-        async fetchYouTubeId(title, tmdbId) {
-            // Step 1: Try to get trailer from TMDB first (more accurate)
-            const res = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}/videos?api_key=${CONFIG.TMDB_KEY}`);
+        async fetchVideo(title, id) {
+            const res = await fetch(`https://api.themoviedb.org/3/movie/${id}/videos?api_key=${CONFIG.TMDB_KEY}`);
             const data = await res.json();
-            const trailer = data.results.find(v => v.type === 'Trailer' && v.site === 'YouTube');
-            
-            if(trailer) {
-                this.loadVideo(trailer.key, true);
-            } else {
-                // Step 2: Fallback to YouTube Search
-                const ytRes = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(title)}+trailer&type=video&key=${CONFIG.YOUTUBE_KEY}`);
-                const ytData = await ytRes.json();
-                if(ytData.items.length > 0) this.loadVideo(ytData.items[0].id.videoId, true);
-            }
+            const vid = data.results.find(v => v.site === 'YouTube' && v.type === 'Trailer') || data.results[0];
+            if(vid) this.loadVideo(vid.key, true);
         },
 
         loadVideo(id, publish) {
+            console.log(">> LOADING VIDEO:", id);
             document.getElementById('player-wrapper').style.display = 'block';
-            window.scrollTo({top: 0, behavior: 'smooth'});
             if (!player) {
-                player = new YT.Player('yt-player', { height: '100%', width: '100%', videoId: id });
+                player = new YT.Player('yt-player', {
+                    height: '100%', width: '100%', videoId: id,
+                    playerVars: { 'autoplay': 1, 'controls': 0 }
+                });
             } else {
                 player.loadVideoById(id);
             }
-            if (publish) this.state.channel.publish('sync', { action: 'LOAD', id });
+            if (publish) this.state.channel.publish('sync', { action: 'LOAD', id: id, sender: this.state.user });
         },
 
         sync(action) {
             if(!player || !player.getCurrentTime) return;
             const time = player.getCurrentTime();
-            this.state.channel.publish('sync', { action, time, sender: this.state.user });
+            console.log(">> SENDING SYNC:", action, time);
+            this.state.channel.publish('sync', { action: action, time: time, sender: this.state.user });
             action === 'PLAY' ? player.playVideo() : player.pauseVideo();
         },
 
         handleRemote(data) {
-            if (data.sender === this.state.user) return;
-            if (data.action === 'LOAD') this.loadVideo(data.id, false);
-            if (data.action === 'PLAY') { player.seekTo(data.time, true); player.playVideo(); }
-            if (data.action === 'PAUSE') { player.pauseVideo(); player.seekTo(data.time, true); }
+            if (data.sender === this.state.user) return; 
+
+            if (data.action === 'LOAD') {
+                console.log(">> REMOTE LOAD TRIGGERED");
+                this.loadVideo(data.id, false);
+            } else if (player) {
+                if (data.action === 'PLAY') { 
+                    console.log(">> REMOTE PLAY AT:", data.time);
+                    player.seekTo(data.time, true); 
+                    player.playVideo(); 
+                }
+                if (data.action === 'PAUSE') { 
+                    console.log(">> REMOTE PAUSE AT:", data.time);
+                    player.pauseVideo(); 
+                    player.seekTo(data.time, true); 
+                }
+            }
         }
     };
-
-    var tag = document.createElement('script');
-    tag.src = "https://www.youtube.com/iframe_api";
-    document.head.appendChild(tag);
 </script>
 </body>
 </html>
