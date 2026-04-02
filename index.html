@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>SYNC_STREAM // CORE_LINK_v3.2</title>
+    <title>SYNC_STREAM // VX-PRO</title>
     <script src="https://cdn.jsdelivr.net/npm/ably@1/ably.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;700&family=Syncopate:wght@700&display=swap" rel="stylesheet">
     <style>
@@ -66,6 +66,7 @@
     };
 
     var player;
+    // Load YouTube API
     var tag = document.createElement('script');
     tag.src = "https://www.youtube.com/iframe_api";
     document.head.appendChild(tag);
@@ -82,14 +83,20 @@
         },
 
         connect() {
-            const ably = new Ably.Realtime({ key: CONFIG.ABLY_KEY });
-            this.state.channel = ably.channels.get(`stream-${this.state.room}`);
-            this.state.channel.subscribe('sync', m => {
-                console.log(">> SIGNAL RECEIVED:", m.data);
-                this.handleRemote(m.data);
-            });
-            document.getElementById('status').innerText = `LINKED: ${this.state.room}`;
-            document.getElementById('status').style.color = 'var(--neon)';
+            // This will now work because of the script tag in the <head>
+            try {
+                const ably = new Ably.Realtime({ key: CONFIG.ABLY_KEY });
+                this.state.channel = ably.channels.get(`stream-${this.state.room}`);
+                this.state.channel.subscribe('sync', m => {
+                    console.log(">> SIGNAL RECEIVED:", m.data);
+                    this.handleRemote(m.data);
+                });
+                document.getElementById('status').innerText = `LINKED: ${this.state.room}`;
+                document.getElementById('status').style.color = 'var(--neon)';
+            } catch(e) {
+                console.error("Ably link failed:", e);
+                document.getElementById('status').innerText = "LINK_FAILED";
+            }
         },
 
         async search() {
@@ -120,7 +127,6 @@
         },
 
         loadVideo(id, publish) {
-            console.log(">> LOADING VIDEO:", id);
             document.getElementById('player-wrapper').style.display = 'block';
             if (!player) {
                 player = new YT.Player('yt-player', {
@@ -136,25 +142,20 @@
         sync(action) {
             if(!player || !player.getCurrentTime) return;
             const time = player.getCurrentTime();
-            console.log(">> SENDING SYNC:", action, time);
             this.state.channel.publish('sync', { action: action, time: time, sender: this.state.user });
             action === 'PLAY' ? player.playVideo() : player.pauseVideo();
         },
 
         handleRemote(data) {
             if (data.sender === this.state.user) return; 
-
             if (data.action === 'LOAD') {
-                console.log(">> REMOTE LOAD TRIGGERED");
                 this.loadVideo(data.id, false);
             } else if (player) {
                 if (data.action === 'PLAY') { 
-                    console.log(">> REMOTE PLAY AT:", data.time);
                     player.seekTo(data.time, true); 
                     player.playVideo(); 
                 }
                 if (data.action === 'PAUSE') { 
-                    console.log(">> REMOTE PAUSE AT:", data.time);
                     player.pauseVideo(); 
                     player.seekTo(data.time, true); 
                 }
