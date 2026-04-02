@@ -1,84 +1,133 @@
-<div class="container">
-    <div class="main-panel">
-        <div class="card">
-            <h4 style="color:var(--primary); text-transform:uppercase; font-size:0.7rem;">Search Free Movies</h4>
-            <div style="display:flex; gap:10px;">
-                <input type="text" id="movie-search" placeholder="Search for 'Full Movie'...">
-                <button class="btn" style="width:auto" onclick="app.searchMovies()">Search</button>
-            </div>
-            <div id="movie-results" style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:1rem;"></div>
-        </div>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>🎀 SyncStream | Watch Together</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;1,400&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/ably@1/ably.min.js"></script>
+<style>
+:root {
+  --rose: #f9a8c9; --rose-deep: #e879a0; --blush: #fce7f0; --cream: #fff8f5;
+  --text-dark: #5c2d4e; --text-soft: #c49ab4; --white: #ffffff;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'DM Sans', sans-serif; background: var(--cream); color: var(--text-dark); }
+.modal { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; background: rgba(252,231,240,0.8); backdrop-filter: blur(10px); }
+.card { background: var(--white); border-radius: 24px; padding: 2rem; box-shadow: 0 10px 30px rgba(0,0,0,0.05); width: 350px; text-align: center; }
+input { width: 100%; padding: 12px; margin: 8px 0; border: 1.5px solid var(--blush); border-radius: 12px; outline: none; }
+.btn { width: 100%; padding: 12px; border: none; border-radius: 12px; background: linear-gradient(135deg, var(--rose), var(--rose-deep)); color: white; cursor: pointer; font-weight: 500; }
+header { padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; background: white; border-bottom: 1px solid var(--blush); }
+main { max-width: 800px; margin: 0 auto; padding: 2rem; }
+#yt-player { width: 100%; aspect-ratio: 16/9; border-radius: 16px; background: #000; overflow: hidden; margin-bottom: 1rem; }
+.results-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 1rem; }
+.movie-card { cursor: pointer; background: white; border-radius: 12px; overflow: hidden; border: 1px solid var(--blush); transition: transform 0.2s; }
+.movie-card:hover { transform: translateY(-3px); }
+.movie-card img { width: 100%; display: block; }
+.movie-card p { padding: 8px; font-size: 12px; font-weight: 500; }
+</style>
+</head>
+<body>
 
-        <div id="player-card" class="card" style="display:none; padding:0; overflow:hidden;">
-            <div id="yt-player"></div> <div style="padding:1rem; display:flex; gap:10px; background:var(--surface);">
-                <button class="btn" onclick="app.sendSync('PLAY')">▶ Sync Play</button>
-                <button class="btn" style="background:#334155; color:white;" onclick="app.sendSync('PAUSE')">⏸ Sync Pause</button>
-            </div>
-        </div>
+<div id="join-modal" class="modal">
+  <div class="card">
+    <h2 style="font-family:'Playfair Display'; margin-bottom: 10px;">Watch Together</h2>
+    <input id="name-in" placeholder="Your Name">
+    <input id="room-in" placeholder="Room Code">
+    <button class="btn" onclick="app.init()">Enter Room 🎀</button>
+  </div>
+</div>
+
+<header>
+  <div style="font-family:'Playfair Display'; font-style:italic; font-size:1.2rem;">Sync<span>Stream</span></div>
+  <div id="room-display" style="font-size:0.8rem; color:var(--text-soft);"></div>
+</header>
+
+<main>
+  <div style="margin-bottom:2rem;">
+    <input id="search-in" placeholder="Search for movies or shows..." style="width:70%;" onkeydown="if(event.key==='Enter')app.search()">
+    <button class="btn" style="width:28%; margin-left:2%;" onclick="app.search()">Search</button>
+    <div id="results" class="results-grid"></div>
+  </div>
+
+  <div id="player-container" style="display:none;">
+    <div id="yt-player"></div>
+    <div style="display:flex; gap:10px;">
+      <button class="btn" onclick="app.sendSync('PLAY')">▶ Sync Play</button>
+      <button class="btn" style="background:#ddd; color:#555;" onclick="app.sendSync('PAUSE')">⏸ Sync Pause</button>
     </div>
-    </div>
+  </div>
+</main>
 
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
-    const CONFIG = {
-        ABLY_KEY: "%%ABLY_KEY%%",
-        YOUTUBE_KEY: "%%YOUTUBE_KEY%%"
-    };
+const CONFIG = {
+  ABLY_KEY: '%%ABLY_KEY%%',
+  YOUTUBE_KEY: '%%YOUTUBE_KEY%%'
+};
 
-    let ytPlayer;
-    // This function is required by YouTube's API
-    function onYouTubeIframeAPIReady() {
-        // Player will be initialized when a movie is selected
+let player;
+function onYouTubeIframeAPIReady() {}
+
+const app = {
+  state: { user: '', room: '', channel: null },
+
+  init() {
+    this.state.user = document.getElementById('name-in').value || 'Guest';
+    this.state.room = document.getElementById('room-in').value.toUpperCase() || 'LOVE';
+    document.getElementById('join-modal').style.display = 'none';
+    document.getElementById('room-display').innerText = 'Room: ' + this.state.room;
+    this.connect();
+  },
+
+  connect() {
+    const ably = new Ably.Realtime({ key: CONFIG.ABLY_KEY });
+    this.state.channel = ably.channels.get('sync-' + this.state.room);
+    this.state.channel.subscribe('sync', m => this.handleRemote(m.data));
+  },
+
+  async search() {
+    const q = document.getElementById('search-in').value;
+    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(q)}+full+movie&type=video&videoEmbeddable=true&maxResults=4&key=${CONFIG.YOUTUBE_KEY}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    this.renderResults(data.items);
+  },
+
+  renderResults(items) {
+    const out = document.getElementById('results');
+    out.innerHTML = '';
+    items.forEach(item => {
+      const div = document.createElement('div');
+      div.className = 'movie-card';
+      div.innerHTML = `<img src="${item.snippet.thumbnails.medium.url}"><p>${item.snippet.title}</p>`;
+      div.onclick = () => this.loadVideo(item.id.videoId, true);
+      out.appendChild(div);
+    });
+  },
+
+  loadVideo(id, publish) {
+    document.getElementById('player-container').style.display = 'block';
+    if (!player) {
+      player = new YT.Player('yt-player', { height: '360', width: '100%', videoId: id });
+    } else {
+      player.loadVideoById(id);
     }
+    if (publish) this.state.channel.publish('sync', { action: 'LOAD', id });
+  },
 
-    const app = {
-        // ... previous state and init code ...
+  sendSync(action) {
+    const time = player.getCurrentTime();
+    this.state.channel.publish('sync', { action, time });
+    action === 'PLAY' ? player.playVideo() : player.pauseVideo();
+  },
 
-        async searchMovies() {
-            const q = document.getElementById('movie-search').value;
-            // We append "full movie" to help find playable content
-            const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${q}+full+movie&type=video&videoEmbeddable=true&maxResults=4&key=${CONFIG.YOUTUBE_KEY}`;
-            const res = await fetch(url);
-            const data = await res.json();
-            
-            const container = document.getElementById('movie-results');
-            container.innerHTML = '';
-            data.items.forEach(item => {
-                const div = document.createElement('div');
-                div.className = 'card'; div.style.cursor = 'pointer';
-                div.innerHTML = `<img src="${item.snippet.thumbnails.medium.url}" style="width:100%; border-radius:4px;"><p style="font-size:0.8rem; margin-top:5px;">${item.snippet.title}</p>`;
-                div.onclick = () => this.loadVideo(item.id.videoId, item.snippet.title);
-                container.appendChild(div);
-            });
-        },
-
-        loadVideo(videoId, title, isRemote = false) {
-            document.getElementById('player-card').style.display = 'block';
-            if (!ytPlayer) {
-                ytPlayer = new YT.Player('yt-player', {
-                    height: '360', width: '100%', videoId: videoId,
-                    playerVars: { 'autoplay': 1, 'controls': 1 }
-                });
-            } else {
-                ytPlayer.loadVideoById(videoId);
-            }
-            if (!isRemote) this.state.channel.publish('sync', { action: 'LOAD', videoId, title });
-        },
-
-        sendSync(action) {
-            const currentTime = ytPlayer.getCurrentTime();
-            this.state.channel.publish('sync', { action, time: currentTime });
-            if (action === 'PLAY') ytPlayer.playVideo();
-            if (action === 'PAUSE') ytPlayer.pauseVideo();
-        },
-
-        handleRemote(data) {
-            if (data.action === 'LOAD') this.loadVideo(data.videoId, data.title, true);
-            if (data.action === 'PLAY') {
-                ytPlayer.seekTo(data.time);
-                ytPlayer.playVideo();
-            }
-            if (data.action === 'PAUSE') ytPlayer.pauseVideo();
-        }
-    };
+  handleRemote(data) {
+    if (data.action === 'LOAD') this.loadVideo(data.id, false);
+    if (data.action === 'PLAY') { player.seekTo(data.time); player.playVideo(); }
+    if (data.action === 'PAUSE') player.pauseVideo();
+  }
+};
 </script>
+</body>
+</html>
