@@ -1,4 +1,4 @@
-name: Production_Deployment_v3
+name: Production_Deployment
 
 on:
   push:
@@ -16,7 +16,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Inject Production Secrets
+      - name: Inject API Keys
         run: |
           sed -i "s|%%ABLY_KEY%%|${{ secrets.ABLY_KEY }}|g" index.html
           sed -i "s|%%TMDB_KEY%%|${{ secrets.TMDB_KEY }}|g" index.html
