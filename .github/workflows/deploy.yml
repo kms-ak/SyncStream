@@ -1,0 +1,30 @@
+name: Deploy Portfolio SyncStream
+
+on:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Inject API Keys
+        run: |
+          sed -i "s/%%ABLY_KEY%%/${{ secrets.ABLY_KEY }}/g" index.html
+          sed -i "s/%%WATCHMODE_KEY%%/${{ secrets.WATCHMODE_KEY }}/g" index.html
+
+      - name: Upload Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+
+      - name: Deploy to Pages
+        uses: actions/deploy-pages@v4
