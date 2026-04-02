@@ -1,25 +1,34 @@
-name: Deploy SyncStream Retro
+name: Production_Deployment_v3
+
 on:
   push:
     branches: ["main"]
+
 permissions:
   contents: read
   pages: write
   id-token: write
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
-      - name: Inject API Keys
+
+      - name: Inject Production Secrets
         run: |
-          sed -i "s/%%ABLY_KEY%%/${{ secrets.ABLY_KEY }}/g" index.html
-          sed -i "s/%%WATCHMODE_KEY%%/${{ secrets.WATCHMODE_KEY }}/g" index.html
-          sed -i "s/%%YOUTUBE_KEY%%/${{ secrets.YOUTUBE_KEY }}/g" index.html
-      - name: Upload Artifact
+          sed -i "s|%%ABLY_KEY%%|${{ secrets.ABLY_KEY }}|g" index.html
+          sed -i "s|%%TMDB_KEY%%|${{ secrets.TMDB_KEY }}|g" index.html
+          sed -i "s|%%YOUTUBE_KEY%%|${{ secrets.YOUTUBE_KEY }}|g" index.html
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload Build Artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: '.'
+
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v4
