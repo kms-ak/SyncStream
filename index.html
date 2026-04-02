@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SyncStream | Real-time Collaborative Watch Party</title>
+    <script src="https://cdn.jsdelivr.net/npm/ably@1/ably.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Outfit:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0f172a;
+            --surface: #1e293b;
+            --primary: #38bdf8;
+            --text-main: #f8fafc;
+            --text-dim: #94a3b8;
+            --accent: #0ea5e9;
+            --border: #334155;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: var(--bg); 
+            color: var(--text-main);
+            line-height: 1.6;
+        }
+
+        /* Hero / Header */
+        header {
+            padding: 2rem;
+            text-align: center;
+            border-bottom: 1px solid var(--border);
+            background: linear-gradient(to bottom, #1e293b, #0f172a);
+        }
+
+        h1 { font-family: 'Outfit', sans-serif; font-size: 2rem; letter-spacing: -0.02em; }
+        h1 span { color: var(--primary); }
+
+        /* Component Layout */
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 2rem;
+            display: grid;
+            grid-template-columns: 1fr 320px;
+            gap: 2rem;
+        }
+
+        @media (max-width: 850px) {
+            .container { grid-template-columns: 1fr; }
+        }
+
+        /* Cards */
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .section-title {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-dim);
+            margin-bottom: 1rem;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* Input Styles */
+        input {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: white;
+            outline: none;
+            transition: border 0.2s;
+        }
+
+        input:focus { border-color: var(--primary); }
+
+        .btn {
+            background: var(--primary);
+            color: var(--bg);
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .btn:hover { opacity: 0.9; }
+
+        /* Chat System */
+        #chat-box {
+            height: 300px;
+            overflow-y: auto;
+            margin-bottom: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .message {
+            font-size: 0.85rem;
+            padding: 0.5rem 0.75rem;
+            border-radius: 8px;
+            max-width: 90%;
+        }
+
+        .message.local { background: var(--accent); align-self: flex-end; }
+        .message.remote { background: var(--border); align-self: flex-start; }
+
+        /* Modal Overlay */
+        #auth-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.95);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .status-dot {
+            height: 8px;
+            width: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 5px;
+            background: #ef4444;
+        }
+
+        .status-dot.online { background: #10b981; box-shadow: 0 0 10px #10b981; }
+    </style>
+</head>
+<body>
+
+<div id="auth-overlay">
+    <div class="card" style="width: 400px; text-align: center;">
+        <h2 style="margin-bottom: 1rem;">SyncStream Setup</h2>
+        <p style="color: var(--text-dim); margin-bottom: 1.5rem; font-size: 0.9rem;">
+            Enter your name and room code to initialize the session.
+        </p>
+        <input type="text" id="user-name" placeholder="Username" style="margin-bottom: 1rem;">
+        <input type="text" id="room-id" placeholder="Room ID (e.g. ALPHA-1)">
+        <button class="btn" style="width: 100%; margin-top: 1.5rem;" onclick="app.init()">Launch Session</button>
+    </div>
+</div>
+
+<header>
+    <h1>Sync<span>Stream</span></h1>
+</header>
+
+<div class="container">
+    <main>
+        <div class="card">
+            <div class="section-title">
+                <span>Media Discovery</span>
+                <span id="api-status">API: %%WATCHMODE_KEY%%</span>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <input type="text" id="search-query" placeholder="Search global titles...">
+                <button class="btn" onclick="app.search()">Search</button>
+            </div>
+            <div id="search-results" style="margin-top: 1rem; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;"></div>
+        </div>
+
+        <div id="player-container" class="card" style="display: none;">
+            <div class="section-title">Active Playback Sync</div>
+            <h3 id="active-title" style="margin-bottom: 1rem;">No Media Selected</h3>
+            <div style="display: flex; gap: 1rem;">
+                <button class="btn" onclick="app.emitSync('PLAY')">Sync Play</button>
+                <button class="btn" style="background: transparent; border: 1px solid var(--border); color: white;" onclick="app.emitSync('PAUSE')">Sync Pause</button>
+            </div>
+        </div>
+    </main>
+
+    <aside>
+        <div class="card">
+            <div class="section-title">
+                <span>Room Status</span>
+                <span id="conn-indicator"><span class="status-dot" id="dot"></span>Connecting...</span>
+            </div>
+            <p id="room-display" style="font-weight: 600; color: var(--primary);">Room: ---</p>
+        </div>
+
+        <div class="card">
+            <div class="section-title">Live Chat</div>
+            <div id="chat-box"></div>
+            <div style="display: flex; gap: 5px;">
+                <input type="text" id="chat-input" placeholder="Message..." onkeydown="if(event.key==='Enter') app.sendChat()">
+                <button class="btn" onclick="app.sendChat()">></button>
+            </div>
+        </div>
+    </aside>
+</div>
+
+<script>
+    // Config Placeholders for GitHub Secrets
+    const CONFIG = {
+        ABLY_KEY: "%%ABLY_KEY%%",
+        WATCHMODE_KEY: "%%WATCHMODE_KEY%%"
+    };
+
+    const app = {
+        state: {
+            user: '',
+            room: '',
+            ably: null,
+            channel: null
+        },
+
+        init() {
+            this.state.user = document.getElementById('user-name').value || 'Anonymous';
+            this.state.room = document.getElementById('room-id').value || 'DEFAULT';
+            
+            if (CONFIG.ABLY_KEY.includes("%%")) {
+                alert("Development Mode: Please ensure GitHub Secrets are configured for deployment.");
+                return;
+            }
+
+            document.getElementById('auth-overlay').style.display = 'none';
+            document.getElementById('room-display').innerText = `Room: ${this.state.room}`;
+            
+            this.connectRealtime();
+        },
+
+        connectRealtime() {
+            this.state.ably = new Ably.Realtime({ key: CONFIG.ABLY_KEY });
+            this.state.channel = this.state.ably.channels.get(`sync-${this.state.room}`);
+
+            this.state.ably.connection.on('connected', () => {
+                document.getElementById('dot').classList.add('online');
+                document.getElementById('conn-indicator').innerText = 'Connected';
+                this.logSystem(`Session established as ${this.state.user}`);
+            });
+
+            this.state.channel.subscribe('sync-event', (msg) => {
+                if (msg.data.sender === this.state.user) return;
+                this.handleRemoteSync(msg.data);
+            });
+
+            this.state.channel.subscribe('chat-msg', (msg) => {
+                if (msg.data.sender !== this.state.user) this.renderMsg(msg.data.sender, msg.data.text, 'remote');
+            });
+        },
+
+        async search() {
+            const query = document.getElementById('search-query').value;
+            const res = await fetch(`https://api.watchmode.com/v1/search/?apiKey=${CONFIG.WATCHMODE_KEY}&search_field=name&search_value=${query}`);
+            const data = await res.json();
+            this.renderResults(data.title_results.slice(0, 4));
+        },
+
+        renderResults(items) {
+            const container = document.getElementById('search-results');
+            container.innerHTML = '';
+            items.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'card';
+                div.style.padding = '10px';
+                div.style.cursor = 'pointer';
+                div.innerHTML = `<p style="font-size: 0.9rem;">${item.name}</p>`;
+                div.onclick = () => this.selectMedia(item);
+                container.appendChild(div);
+            });
+        },
+
+        selectMedia(item) {
+            document.getElementById('player-container').style.display = 'block';
+            document.getElementById('active-title').innerText = item.name;
+            this.emitSync('LOAD', { title: item.name });
+        },
+
+        emitSync(action, payload = {}) {
+            this.state.channel.publish('sync-event', {
+                action,
+                sender: this.state.user,
+                ...payload
+            });
+            this.logSystem(`Local: ${action}`);
+        },
+
+        handleRemoteSync(data) {
+            if (data.action === 'LOAD') {
+                document.getElementById('player-container').style.display = 'block';
+                document.getElementById('active-title').innerText = data.title;
+            }
+            this.logSystem(`Remote: ${data.action} by ${data.sender}`);
+        },
+
+        sendChat() {
+            const el = document.getElementById('chat-input');
+            const text = el.value;
+            if (!text) return;
+            this.state.channel.publish('chat-msg', { sender: this.state.user, text });
+            this.renderMsg('You', text, 'local');
+            el.value = '';
+        },
+
+        renderMsg(who, text, type) {
+            const box = document.getElementById('chat-box');
+            const div = document.createElement('div');
+            div.className = `message ${type}`;
+            div.innerHTML = `<span style="font-size: 10px; display: block; opacity: 0.7;">${who}</span>${text}`;
+            box.appendChild(div);
+            box.scrollTop = box.scrollHeight;
+        },
+
+        logSystem(msg) {
+            console.log(`[System] ${msg}`);
+        }
+    };
+</script>
+</body>
+</html>
