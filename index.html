@@ -174,7 +174,7 @@
 <script>
     // Robust Key Handling for Ably
     const KEYS = { ABLY: '%%ABLY_KEY%%' };
-    const FALLBACK_KEY = 'j0IuLw.2D-5qA:I-0n9Rz0h6L7O5e0'; // Example key for demo reliability
+    const FALLBACK_KEY = 'j0IuLw.2D-5qA:I-0n9Rz0h6L7O5e0';
     
     let player = null;
     let hls = null;
@@ -186,8 +186,8 @@
             channel: null, 
             url: '', 
             mode: 'IDLE', 
-            isSelfAction: false,
-            lastEmit: 0
+            lastEmit: 0,
+            ignoreNextSignal: false
         },
 
         init() {
@@ -218,8 +218,9 @@
                     this.state.channel.presence.subscribe((member) => {
                         if (member.action === 'enter') {
                             this.addSystemMsg(`${member.clientId} joined.`);
-                            if(this.state.url && member.clientId !== this.state.user) {
-                                 this.emit('STATE_DATA');
+                            // New joiner asks for current state
+                            if (member.clientId === this.state.user) {
+                                this.emit('QUERY_STATE');
                             }
                         } else if (member.action === 'leave') {
                             this.addSystemMsg(`${member.clientId} left.`);
@@ -227,8 +228,6 @@
                     });
 
                     this.state.channel.presence.enter();
-                    // Query for existing state after a short delay
-                    setTimeout(() => this.emit('QUERY_STATE'), 800);
                 });
 
                 realtime.connection.on('failed', () => {
@@ -253,9 +252,7 @@
         syncAction() {
             const val = document.getElementById('media-url').value.trim();
             if(val) {
-                // IMPORTANT: Load locally first
                 this.load(val); 
-                // Then tell the world
                 this.emit('LOAD', val);
             }
         },
@@ -263,7 +260,6 @@
         load(url, time = 0) {
             if (!url) return;
             
-            // If already on this URL and not just resetting, only update time
             if (url === this.state.url && this.state.mode !== 'IDLE') {
                 if(time > 0 && player) player.currentTime = time;
                 return;
@@ -322,6 +318,22 @@
                 player = new Plyr(v, { autoplay: true, muted: true });
             }
 
+            // BIDIRECTIONAL CONTROL: Bind player events to emit signals
+            player.on('play', () => {
+                if(!this.state.ignoreNextSignal) this.emit('PLAY');
+                this.state.ignoreNextSignal = false;
+            });
+            
+            player.on('pause', () => {
+                if(!this.state.ignoreNextSignal) this.emit('PAUSE');
+                this.state.ignoreNextSignal = false;
+            });
+
+            player.on('seeked', () => {
+                if(!this.state.ignoreNextSignal) this.emit('SEEK');
+                this.state.ignoreNextSignal = false;
+            });
+
             player.on('ready', () => { 
                 if(time > 0) player.currentTime = time; 
             });
@@ -330,9 +342,8 @@
         emit(type, payload = null) {
             if (!this.state.channel) return;
             
-            // Rate limiting emits
             const now = Date.now();
-            if(now - this.state.lastEmit < 200 && type === 'SEEK') return;
+            if(now - this.state.lastEmit < 300 && type === 'SEEK') return;
             this.state.lastEmit = now;
 
             const data = {
@@ -348,11 +359,10 @@
 
         handleSignal(data) {
             if(data.type === 'CHAT') return this.addChat(data.user, data.msg);
-            
-            // Ignore signals sent by self except for verification
             if(data.user === this.state.user) return;
 
-            console.log("RECV SIGNAL:", data.type, data);
+            // Flag to prevent internal player events from triggering a re-emit
+            this.state.ignoreNextSignal = true;
 
             switch(data.type) {
                 case 'LOAD': 
@@ -377,7 +387,7 @@
                     if(this.state.url) this.emit('STATE_DATA'); 
                     break;
                 case 'STATE_DATA': 
-                    if(!this.state.url || Math.abs(player.currentTime - data.time) > 10) {
+                    if(!this.state.url || Math.abs(player.currentTime - data.time) > 5) {
                         this.load(data.url, data.time);
                     }
                     break;
