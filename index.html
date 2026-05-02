@@ -3,8 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SYNC_STREAM // TELEPARTY_PRO</title>
+    <title>SYNC_STREAM // TOTAL_UNIVERSAL</title>
     <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
+    
+    <!-- Plyr & HLS.js for Universal Streaming Support -->
+    <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
+    <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Fira+Code:wght@400;700&family=Syncopate:wght@700&display=swap" rel="stylesheet">
     <style>
         :root { 
@@ -27,7 +33,6 @@
             flex-direction: column;
         }
         
-        /* Auth UI Overlay */
         #auth-overlay { position: fixed; inset: 0; z-index: 9999; background: var(--bg); display: flex; align-items: center; justify-content: center; }
         .auth-card { border: 1px solid var(--neon); padding: 40px; width: 90%; max-width: 400px; background: var(--panel); text-align: center; box-shadow: 0 0 30px rgba(0,242,255,0.1); border-radius: 8px; }
         
@@ -42,144 +47,104 @@
         }
         .logo { font-family: 'Syncopate', sans-serif; color: var(--neon); letter-spacing: 2px; font-size: 0.7rem; }
         
-        /* Main Workspace */
-        .app-container {
-            display: flex;
-            flex: 1;
-            overflow: hidden;
-        }
+        .app-container { display: flex; flex: 1; overflow: hidden; position: relative; }
 
-        /* Video Section */
-        .video-section {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            padding: 20px;
-            overflow-y: auto;
-        }
-        #player-container { 
+        .video-section { flex: 1; display: flex; flex-direction: column; padding: 20px; overflow-y: auto; transition: all 0.3s ease; }
+        #player-wrapper { 
             width: 100%; 
             background: #000; 
             border: 1px solid var(--border); 
-            padding: 5px;
             border-radius: 8px;
+            overflow: hidden;
             box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            margin-bottom: 20px;
             display: none;
         }
-        .video-wrapper { width: 100%; aspect-ratio: 16/9; }
 
-        /* Chat Sidebar */
-        .chat-sidebar {
-            width: 350px;
-            background: var(--chat-bg);
-            border-left: 1px solid var(--border);
-            display: flex;
-            flex-direction: column;
+        /* Sidebar Styling */
+        .chat-sidebar { 
+            width: 350px; 
+            background: var(--chat-bg); 
+            border-left: 1px solid var(--border); 
+            display: flex; 
+            flex-direction: column; 
+            transition: transform 0.3s ease, width 0.3s ease;
         }
-        .chat-header {
-            padding: 15px;
-            border-bottom: 1px solid var(--border);
-            font-weight: 600;
-            font-size: 0.8rem;
-            color: var(--neon);
-            text-transform: uppercase;
-        }
-        #chat-messages {
-            flex: 1;
-            overflow-y: auto;
-            padding: 15px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
+        .chat-sidebar.collapsed { width: 0; transform: translateX(100%); overflow: hidden; border: none; }
+        
+        .chat-header { padding: 15px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 0.8rem; color: var(--neon); text-transform: uppercase; display: flex; justify-content: space-between; align-items: center; }
+        #chat-messages { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
         .msg { font-size: 0.85rem; line-height: 1.4; word-wrap: break-word; }
         .msg-user { color: var(--neon); font-weight: bold; margin-right: 5px; }
         .msg-system { color: #666; font-style: italic; font-size: 0.75rem; text-align: center; margin: 8px 0; }
         
-        .chat-input-area {
-            padding: 15px;
-            border-top: 1px solid var(--border);
-            display: flex;
-            gap: 10px;
-        }
+        .chat-input-area { padding: 15px; border-top: 1px solid var(--border); display: flex; gap: 10px; }
 
-        /* Controls */
-        input { 
-            background: #000; 
-            border: 1px solid var(--border); 
-            color: var(--text); 
-            padding: 10px; 
-            border-radius: 4px; 
-            outline: none;
-            font-family: 'Fira Code', monospace;
-        }
+        input { background: #000; border: 1px solid var(--border); color: var(--text); padding: 10px; border-radius: 4px; outline: none; font-family: 'Fira Code', monospace; }
         input:focus { border-color: var(--neon); }
-        .btn { 
-            padding: 10px 20px; 
-            background: transparent; 
-            border: 1px solid var(--neon); 
-            color: var(--neon); 
-            cursor: pointer; 
-            font-weight: bold;
-            font-size: 0.7rem;
-            border-radius: 4px;
-            transition: 0.2s;
-        }
+        .btn { padding: 10px 20px; background: transparent; border: 1px solid var(--neon); color: var(--neon); cursor: pointer; font-weight: bold; font-size: 0.7rem; border-radius: 4px; transition: 0.2s; }
         .btn:hover { background: var(--neon); color: #000; }
         .btn-red { border-color: var(--error); color: var(--error); }
         .btn-red:hover { background: var(--error); color: #fff; }
+        .btn-small { padding: 5px 10px; font-size: 0.6rem; }
         
-        .sync-btns { display: flex; gap: 10px; margin-top: 15px; }
-
+        .sync-btns { display: flex; gap: 10px; }
         .status-pill { font-size: 0.6rem; padding: 2px 8px; border: 1px solid #333; border-radius: 10px; }
         .online { color: var(--neon); border-color: var(--neon); }
 
-        @media (max-width: 800px) {
-            .app-container { flex-direction: column; }
-            .chat-sidebar { width: 100%; height: 300px; }
-        }
+        .plyr--full-ui.plyr--video { --plyr-color-main: var(--neon); }
+
+        /* Theater Mode Toggle */
+        #theater-toggle { position: fixed; right: 20px; bottom: 20px; z-index: 100; opacity: 0.5; }
+        #theater-toggle:hover { opacity: 1; }
     </style>
 </head>
 <body>
 
 <div id="auth-overlay">
     <div class="auth-card">
-        <h2 style="color:var(--neon); margin-bottom:20px; font-family: 'Syncopate'; font-size: 0.9rem;">TELEPARTY_JOIN</h2>
+        <h2 style="color:var(--neon); margin-bottom:20px; font-family: 'Syncopate'; font-size: 0.9rem;">NETWORK_ACCESS</h2>
         <input type="text" id="user-id" placeholder="USERNAME" style="width:100%; margin-bottom:15px;">
         <input type="text" id="room-id" placeholder="ROOM_CODE" style="width:100%; margin-bottom:15px;">
-        <button class="btn" style="width:100%" onclick="app.init()">ENTER_LOBBY</button>
+        <button class="btn" style="width:100%" onclick="app.init()">INITIALIZE</button>
     </div>
 </div>
 
 <header>
-    <div class="logo">SYNC_STREAM // TELEPARTY</div>
-    <div id="connection-status" class="status-pill">OFFLINE</div>
+    <div class="logo">SYNC_STREAM // TOTAL_UNIVERSAL</div>
+    <div style="display: flex; gap: 15px; align-items: center;">
+        <div id="connection-status" class="status-pill">OFFLINE</div>
+        <button class="btn btn-small" onclick="app.toggleSidebar()">TOGGLE CHAT</button>
+    </div>
 </header>
 
 <div class="app-container">
-    <div class="video-section">
-        <div class="input-group" style="display:flex; gap:10px; margin-bottom:20px;">
-            <input type="text" id="manual-url" placeholder="Paste YouTube link to sync movie..." style="flex:1">
-            <button class="btn" onclick="app.loadManualUrl()">SYNC_MOVIE</button>
+    <div class="video-section" id="video-section">
+        <div style="display:flex; gap:10px; margin-bottom:20px;">
+            <input type="text" id="media-url" placeholder="YouTube, MP4, or .m3u8 stream link..." style="flex:1">
+            <button class="btn" onclick="app.syncMedia()">SYNC_SIGNAL</button>
         </div>
 
-        <div id="player-container">
-            <div class="video-wrapper">
-                <div id="yt-player"></div>
-            </div>
+        <div id="player-wrapper">
+            <div id="player-mount"></div>
         </div>
 
         <div class="sync-btns" id="global-controls" style="display:none;">
-            <button class="btn" onclick="app.emitSync('PLAY')">PLAY FOR ALL</button>
-            <button class="btn btn-red" onclick="app.emitSync('PAUSE')">PAUSE FOR ALL</button>
+            <button class="btn" onclick="app.emitSync('PLAY')">PLAY_ALL</button>
+            <button class="btn btn-red" onclick="app.emitSync('PAUSE')">PAUSE_ALL</button>
+            <button class="btn" onclick="app.emitSync('SEEK')">SYNC_TIME</button>
         </div>
+        
+        <div id="media-info" style="margin-top: 15px; font-size: 0.7rem; color: #555; font-family: 'Fira Code';"></div>
     </div>
 
-    <div class="chat-sidebar">
-        <div class="chat-header">Party Chat</div>
+    <div class="chat-sidebar" id="chat-sidebar">
+        <div class="chat-header">
+            <span>Transmission Log</span>
+        </div>
         <div id="chat-messages"></div>
         <div class="chat-input-area">
-            <input type="text" id="chat-input" placeholder="Say something..." style="flex:1" onkeydown="if(event.key==='Enter')app.sendChat()">
+            <input type="text" id="chat-input" placeholder="Type message..." style="flex:1" onkeydown="if(event.key==='Enter')app.sendChat()">
             <button class="btn" onclick="app.sendChat()">SEND</button>
         </div>
     </div>
@@ -188,15 +153,16 @@
 <script>
     const KEYS = { ABLY: '%%ABLY_KEY%%' };
 
-    let player;
+    let playerInstance = null;
+    let hlsInstance = null;
+
     const app = {
-        config: { user: '', room: '', channel: null },
+        config: { user: '', room: '', channel: null, currentSource: '', isSidebarVisible: true },
 
         init() {
             const u = document.getElementById('user-id').value.trim();
             const r = document.getElementById('room-id').value.trim();
-            if(!u || !r) return alert("Username and Room Code required.");
-            
+            if(!u || !r) return;
             this.config.user = u;
             this.config.room = r.toUpperCase();
             document.getElementById('auth-overlay').style.display = 'none';
@@ -205,75 +171,148 @@
 
         initAbly() {
             if (!KEYS.ABLY || KEYS.ABLY.startsWith('%%')) {
-                this.systemMessage("Ably Key Missing: Offline Mode");
+                this.systemMessage("Ably Key Missing: Offline Mode Enabled.");
                 return;
             }
-
-            try {
-                const ably = new Ably.Realtime({ key: KEYS.ABLY });
-                ably.connection.on('connected', () => {
-                    this.config.channel = ably.channels.get(`party_${this.config.room}`);
-                    
-                    const status = document.getElementById('connection-status');
-                    status.innerText = `CONNECTED: ${this.config.room}`;
-                    status.className = 'status-pill online';
-
-                    this.config.channel.subscribe('event', (msg) => this.handleEvent(msg.data));
-                    
-                    this.systemMessage(`Welcome to the party, ${this.config.user}!`);
-                    this.config.channel.publish('event', { type: 'SYSTEM', msg: `${this.config.user} joined the chat.` });
-                    
-                    // Late joiner logic: Ask others what is playing
-                    setTimeout(() => this.emitSync('ASK_STATUS'), 1500);
-                });
-            } catch (e) {
-                console.error("Ably failure:", e);
-                this.systemMessage("Connection error.");
-            }
+            const ably = new Ably.Realtime({ key: KEYS.ABLY });
+            ably.connection.on('connected', () => {
+                this.config.channel = ably.channels.get(`stream_${this.config.room}`);
+                document.getElementById('connection-status').innerText = `LIVE: ${this.config.room}`;
+                document.getElementById('connection-status').className = 'status-pill online';
+                
+                this.config.channel.subscribe('sync', (msg) => this.handleSync(msg.data));
+                
+                this.systemMessage(`Uplink established. Protocol v2.0 active.`);
+                this.config.channel.publish('sync', { type: 'SYSTEM', msg: `${this.config.user} joined the party.` });
+                
+                // When joining, check if a movie is already running
+                setTimeout(() => this.emitSync('REQUEST_STATE'), 1000);
+            });
         },
 
-        loadManualUrl() {
-            const val = document.getElementById('manual-url').value;
-            const id = this.extractId(val);
-            if(id) {
-                this.playVideo(id, true);
+        toggleSidebar() {
+            this.config.isSidebarVisible = !this.config.isSidebarVisible;
+            const sidebar = document.getElementById('chat-sidebar');
+            if (this.config.isSidebarVisible) {
+                sidebar.classList.remove('collapsed');
             } else {
-                alert("Please provide a valid YouTube URL.");
+                sidebar.classList.add('collapsed');
             }
         },
 
-        extractId(url) {
+        syncMedia() {
+            const url = document.getElementById('media-url').value.trim();
+            if(!url) return;
+            this.emitSync('LOAD_MEDIA', url);
+        },
+
+        loadMedia(url, startTime = 0) {
+            if (this.config.currentSource === url && startTime === 0) return; // Prevent double load
+            
+            this.config.currentSource = url;
+            const isYouTube = url.includes('youtube.com') || url.includes('youtu.be');
+            const isHLS = url.includes('.m3u8') || url.includes('.ts');
+            
+            document.getElementById('player-wrapper').style.display = 'block';
+            document.getElementById('global-controls').style.display = 'flex';
+            document.getElementById('media-info').innerText = `SOURCE: ${url}`;
+            
+            if (playerInstance) playerInstance.destroy();
+            if (hlsInstance) hlsInstance.destroy();
+            
+            const mount = document.getElementById('player-mount');
+            
+            if (isYouTube) {
+                mount.innerHTML = `<div class="plyr__video-embed"><iframe src="https://www.youtube.com/embed/${this.extractYTId(url)}?origin=${window.location.origin}&amp;iv_load_policy=3&amp;modestbranding=1&amp;playsinline=1&amp;showinfo=0&amp;rel=0&amp;enablejsapi=1" allowfullscreen allowtransparency allow="autoplay"></iframe></div>`;
+                playerInstance = new Plyr(mount.firstElementChild);
+            } else {
+                mount.innerHTML = `<video playsinline controls crossorigin="anonymous"></video>`;
+                const video = mount.querySelector('video');
+                
+                if (isHLS && Hls.isSupported()) {
+                    hlsInstance = new Hls();
+                    hlsInstance.loadSource(url);
+                    hlsInstance.attachMedia(video);
+                    playerInstance = new Plyr(video);
+                } else {
+                    video.src = url;
+                    playerInstance = new Plyr(video);
+                }
+            }
+
+            playerInstance.on('ready', () => {
+                if(startTime > 0) playerInstance.currentTime = startTime;
+            });
+        },
+
+        extractYTId(url) {
             const match = url.match(/^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/);
             return (match && match[2].length === 11) ? match[2] : null;
         },
 
-        playVideo(id, broadcast = false, startTime = 0) {
-            document.getElementById('player-container').style.display = 'block';
-            document.getElementById('global-controls').style.display = 'flex';
-            
-            if (!player) {
-                player = new YT.Player('yt-player', {
-                    height: '100%', width: '100%', videoId: id,
-                    playerVars: { 'autoplay': 1, 'controls': 1, 'start': Math.floor(startTime), 'modestbranding': 1 }
-                });
-            } else {
-                player.loadVideoById({ videoId: id, startSeconds: startTime });
-            }
+        emitSync(type, data = null) {
+            if (!this.config.channel) return;
+            this.config.channel.publish('sync', {
+                type,
+                user: this.config.user,
+                url: data || this.config.currentSource,
+                time: playerInstance ? playerInstance.currentTime : 0
+            });
+        },
 
-            if (broadcast) this.emitSync('LOAD', id);
+        handleSync(data) {
+            if(data.type === 'CHAT') return this.postChat(data.user, data.msg);
+            if(data.type === 'SYSTEM') return this.systemMessage(data.msg);
+            
+            switch(data.type) {
+                case 'LOAD_MEDIA':
+                    this.loadMedia(data.url);
+                    break;
+                case 'PLAY':
+                    if(playerInstance) {
+                        playerInstance.currentTime = data.time;
+                        playerInstance.play();
+                    }
+                    break;
+                case 'PAUSE':
+                    if(playerInstance) {
+                        playerInstance.pause();
+                        playerInstance.currentTime = data.time;
+                    }
+                    break;
+                case 'SEEK':
+                    if(playerInstance) playerInstance.currentTime = data.time;
+                    break;
+                case 'REQUEST_STATE':
+                    // If someone asks for state and we have a video playing, send them the details
+                    if(data.user !== this.config.user && this.config.currentSource) {
+                        this.emitSync('STATE_RESPONSE');
+                    }
+                    break;
+                case 'STATE_RESPONSE':
+                    // We only accept state if we don't have one yet
+                    if(!this.config.currentSource) {
+                        this.loadMedia(data.url, data.time);
+                    }
+                    break;
+            }
         },
 
         sendChat() {
             const input = document.getElementById('chat-input');
             const msg = input.value.trim();
             if(!msg || !this.config.channel) return;
-            
-            this.config.channel.publish('event', { 
-                type: 'CHAT', 
-                user: this.config.user, 
-                msg: msg 
-            });
+            this.config.channel.publish('sync', { type: 'CHAT', user: this.config.user, msg: msg });
             input.value = '';
+        },
+
+        postChat(user, msg) {
+            const div = document.createElement('div');
+            div.className = 'msg';
+            div.innerHTML = `<span class="msg-user">${user}:</span> ${msg}`;
+            const box = document.getElementById('chat-messages');
+            box.appendChild(div);
+            box.scrollTop = box.scrollHeight;
         },
 
         systemMessage(text) {
@@ -283,84 +322,8 @@
             const box = document.getElementById('chat-messages');
             box.appendChild(div);
             box.scrollTop = box.scrollHeight;
-        },
-
-        emitSync(type, data = null) {
-            if (!this.config.channel) return;
-            
-            const payload = {
-                type, 
-                sender: this.config.user,
-                time: player ? player.getCurrentTime() : 0,
-                videoId: data || (player ? player.getVideoData().video_id : null)
-            };
-            
-            this.config.channel.publish('event', payload);
-        },
-
-        handleEvent(data) {
-            // Global messages (Chat/System)
-            if(data.type === 'CHAT') {
-                const div = document.createElement('div');
-                div.className = 'msg';
-                div.innerHTML = `<span class="msg-user">${data.user}:</span> ${data.msg}`;
-                const box = document.getElementById('chat-messages');
-                box.appendChild(div);
-                box.scrollTop = box.scrollHeight;
-                return;
-            }
-
-            if(data.type === 'SYSTEM') return this.systemMessage(data.msg);
-
-            // Synchronization Logic
-            switch(data.type) {
-                case 'ASK_STATUS':
-                    // If someone joins and we are watching something, tell them
-                    if(data.sender !== this.config.user && player && player.getVideoData().video_id) {
-                        this.emitSync('GIVE_STATUS');
-                    }
-                    break;
-
-                case 'GIVE_STATUS':
-                    // We just joined and someone responded with the current movie state
-                    if(data.sender !== this.config.user) {
-                        const currentId = player ? player.getVideoData().video_id : null;
-                        if(currentId !== data.videoId) {
-                            this.playVideo(data.videoId, false, data.time);
-                        }
-                    }
-                    break;
-
-                case 'LOAD':
-                    if(data.sender !== this.config.user) {
-                        this.playVideo(data.videoId, false);
-                    }
-                    break;
-
-                case 'PLAY':
-                    // Fixed: Apply to everyone including sender to ensure exact sync
-                    if(player) {
-                        player.seekTo(data.time, true);
-                        player.playVideo();
-                    }
-                    break;
-
-                case 'PAUSE':
-                    // Fixed: Apply to everyone including sender
-                    if(player) {
-                        player.pauseVideo();
-                        player.seekTo(data.time, true);
-                    }
-                    break;
-            }
         }
     };
-
-    // YouTube API Initialization
-    const tag = document.createElement('script');
-    tag.src = "https://www.youtube.com/iframe_api";
-    document.head.appendChild(tag);
-    function onYouTubeIframeAPIReady() { console.log("Youtube System Online"); }
 </script>
 </body>
 </html>
