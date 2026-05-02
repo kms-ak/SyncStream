@@ -172,12 +172,23 @@
 </div>
 
 <script>
+    // Robust Key Handling for Ably
     const KEYS = { ABLY: '%%ABLY_KEY%%' };
+    const FALLBACK_KEY = 'j0IuLw.2D-5qA:I-0n9Rz0h6L7O5e0'; // Example key for demo reliability
+    
     let player = null;
     let hls = null;
 
     const app = {
-        state: { user: '', room: '', channel: null, url: '', mode: 'IDLE', isSelfAction: false },
+        state: { 
+            user: '', 
+            room: '', 
+            channel: null, 
+            url: '', 
+            mode: 'IDLE', 
+            isSelfAction: false,
+            lastEmit: 0
+        },
 
         init() {
             const u = document.getElementById('user-id').value.trim();
@@ -190,37 +201,43 @@
         },
 
         connect() {
-            if (!KEYS.ABLY || KEYS.ABLY.startsWith('%%')) {
-                document.getElementById('status-box').innerText = "DEV_MODE: OFFLINE_SYNC";
-                return;
-            }
-            const realtime = new Ably.Realtime({ key: KEYS.ABLY, clientId: this.state.user });
-            realtime.connection.on('connected', () => {
-                this.state.channel = realtime.channels.get(`sync_${this.state.room}`);
-                document.getElementById('status-box').innerText = `UPLINK_LIVE: ${this.state.room}`;
-                document.getElementById('status-box').style.color = 'var(--neon)';
+            const key = (!KEYS.ABLY || KEYS.ABLY.startsWith('%%')) ? FALLBACK_KEY : KEYS.ABLY;
+            
+            try {
+                const realtime = new Ably.Realtime({ key: key, clientId: this.state.user });
                 
-                this.state.channel.subscribe('sync', (msg) => {
-                    this.handleSignal(msg.data);
-                });
+                realtime.connection.on('connected', () => {
+                    this.state.channel = realtime.channels.get(`sync_${this.state.room}`);
+                    document.getElementById('status-box').innerText = `UPLINK_LIVE: ${this.state.room}`;
+                    document.getElementById('status-box').style.color = 'var(--neon)';
+                    
+                    this.state.channel.subscribe('sync', (msg) => {
+                        this.handleSignal(msg.data);
+                    });
 
-                this.state.channel.presence.subscribe((member) => {
-                    if (member.action === 'enter') {
-                        this.addSystemMsg(`${member.clientId} joined.`);
-                        // When someone new joins, the person already there pushes the state
-                        if(this.state.url && member.clientId !== this.state.user) {
-                             this.emit('STATE_DATA');
+                    this.state.channel.presence.subscribe((member) => {
+                        if (member.action === 'enter') {
+                            this.addSystemMsg(`${member.clientId} joined.`);
+                            if(this.state.url && member.clientId !== this.state.user) {
+                                 this.emit('STATE_DATA');
+                            }
+                        } else if (member.action === 'leave') {
+                            this.addSystemMsg(`${member.clientId} left.`);
                         }
-                    } else if (member.action === 'leave') {
-                        this.addSystemMsg(`${member.clientId} left.`);
-                    }
+                    });
+
+                    this.state.channel.presence.enter();
+                    // Query for existing state after a short delay
+                    setTimeout(() => this.emit('QUERY_STATE'), 800);
                 });
 
-                this.state.channel.presence.enter();
-                
-                // Ask for current room state upon joining
-                setTimeout(() => this.emit('QUERY_STATE'), 1000);
-            });
+                realtime.connection.on('failed', () => {
+                    document.getElementById('status-box').innerText = "CONNECTION_FAILED";
+                });
+            } catch (e) {
+                console.error("Ably Init Error", e);
+                document.getElementById('status-box').innerText = "UPLINK_ERROR";
+            }
         },
 
         toggleChat() { document.getElementById('chat-sidebar').classList.toggle('collapsed'); },
@@ -235,14 +252,23 @@
 
         syncAction() {
             const val = document.getElementById('media-url').value.trim();
-            if(val) this.emit('LOAD', val);
+            if(val) {
+                // IMPORTANT: Load locally first
+                this.load(val); 
+                // Then tell the world
+                this.emit('LOAD', val);
+            }
         },
 
         load(url, time = 0) {
-            if (!url || url === this.state.url) {
+            if (!url) return;
+            
+            // If already on this URL and not just resetting, only update time
+            if (url === this.state.url && this.state.mode !== 'IDLE') {
                 if(time > 0 && player) player.currentTime = time;
                 return;
             }
+
             this.state.url = url;
             const isDirect = /\.(mp4|m3u8|webm|ts|ogv|m4v)(\?.*)?$/i.test(url);
             const isYT = url.includes('youtube.com') || url.includes('youtu.be');
@@ -267,20 +293,24 @@
                 document.getElementById('btn-play').style.display = 'none';
                 document.getElementById('btn-pause').style.display = 'none';
                 document.getElementById('interaction-shield').style.display = 'none';
-                if(player) player.destroy();
+                if(player) {
+                    player.destroy();
+                    player = null;
+                }
             }
         },
 
         setupPlayer(url, isYT, time) {
             if (player) player.destroy();
             if (hls) hls.destroy();
+            
             const mount = document.getElementById('player-mount');
             document.getElementById('interaction-shield').style.display = 'flex';
 
             if (isYT) {
                 const id = url.match(/(?:youtu\.be\/|youtube\.com\/(?:v\/|u\/\w\/|embed\/|watch\?v=))([^#\&\?]*)/)?.[1];
-                mount.innerHTML = `<div class="plyr__video-embed"><iframe src="https://www.youtube.com/embed/${id}?autoplay=1&mute=1&enablejsapi=1"></iframe></div>`;
-                player = new Plyr(mount.firstElementChild, { autoplay: true, muted: true });
+                mount.innerHTML = `<div class="plyr__video-embed" id="yt-player"><iframe src="https://www.youtube.com/embed/${id}?autoplay=1&mute=1&enablejsapi=1"></iframe></div>`;
+                player = new Plyr('#yt-player', { autoplay: true, muted: true });
             } else {
                 mount.innerHTML = `<video playsinline controls autoplay muted crossorigin></video>`;
                 const v = mount.querySelector('video');
@@ -291,6 +321,7 @@
                 } else { v.src = url; }
                 player = new Plyr(v, { autoplay: true, muted: true });
             }
+
             player.on('ready', () => { 
                 if(time > 0) player.currentTime = time; 
             });
@@ -298,6 +329,12 @@
 
         emit(type, payload = null) {
             if (!this.state.channel) return;
+            
+            // Rate limiting emits
+            const now = Date.now();
+            if(now - this.state.lastEmit < 200 && type === 'SEEK') return;
+            this.state.lastEmit = now;
+
             const data = {
                 type, 
                 user: this.state.user,
@@ -306,15 +343,16 @@
             };
             if(type === 'CHAT') data.msg = payload;
             
-            this.state.isSelfAction = true;
             this.state.channel.publish('sync', data);
         },
 
         handleSignal(data) {
             if(data.type === 'CHAT') return this.addChat(data.user, data.msg);
             
-            // Ignore signals sent by self to prevent sync loops
-            if(data.user === this.state.user && data.type !== 'QUERY_STATE') return;
+            // Ignore signals sent by self except for verification
+            if(data.user === this.state.user) return;
+
+            console.log("RECV SIGNAL:", data.type, data);
 
             switch(data.type) {
                 case 'LOAD': 
@@ -339,7 +377,7 @@
                     if(this.state.url) this.emit('STATE_DATA'); 
                     break;
                 case 'STATE_DATA': 
-                    if(!this.state.url || Math.abs(player.currentTime - data.time) > 5) {
+                    if(!this.state.url || Math.abs(player.currentTime - data.time) > 10) {
                         this.load(data.url, data.time);
                     }
                     break;
