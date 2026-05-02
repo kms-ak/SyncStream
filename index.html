@@ -3,28 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SYNC_STREAM // TOTAL_CONTROL_V9</title>
+    <title>SYNC_STREAM // HYBRID_V5</title>
     
     <!-- Ably for Real-time Messaging -->
     <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
     
-    <!-- Plyr & HLS.js for Universal Video Support -->
+    <!-- Plyr & HLS.js -->
     <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
     <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 
-    <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Fira+Code:wght@400;700&family=Syncopate:wght@700&display=swap" rel="stylesheet">
 
     <style>
         :root { 
             --neon: #00f2ff; 
-            --bg: #0a0a0f; 
-            --panel: #12121a; 
-            --border: #1f1f2e; 
+            --bg: #050508; 
+            --panel: #0a0a0f; 
+            --border: #1a1a24; 
             --text: #e0e0e6; 
             --error: #ff4d4d;
-            --chat-bg: #0d0d14;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -51,80 +49,89 @@
             justify-content: center; 
         }
         .auth-card { 
-            border: 1px solid var(--neon); 
+            border: 1px solid var(--border); 
             padding: 40px; 
             width: 90%; 
             max-width: 400px; 
             background: var(--panel); 
             text-align: center; 
-            box-shadow: 0 0 30px rgba(0,242,255,0.15); 
-            border-radius: 8px; 
+            border-radius: 4px; 
         }
         
         /* --- HEADER --- */
         header { 
             height: 60px;
-            padding: 0 20px; 
-            border-bottom: 1px solid var(--border); 
+            padding: 0 30px; 
             display: flex; 
             justify-content: space-between; 
             align-items: center; 
-            background: var(--panel);
+            background: var(--bg);
         }
-        .logo { font-family: 'Syncopate', sans-serif; color: var(--neon); letter-spacing: 2px; font-size: 0.75rem; }
+        .logo { font-family: 'Syncopate', sans-serif; color: var(--neon); letter-spacing: 2px; font-size: 0.85rem; }
         
-        /* --- LAYOUT --- */
-        .app-container { display: flex; flex: 1; overflow: hidden; position: relative; }
+        .header-meta { display: flex; gap: 20px; align-items: center; font-family: 'Syncopate'; font-size: 0.65rem; color: var(--neon); }
 
-        .video-section { 
+        /* --- LAYOUT --- */
+        .app-container { display: flex; flex: 1; overflow: hidden; }
+
+        .main-stage { 
             flex: 1; 
             display: flex; 
             flex-direction: column; 
-            padding: 20px; 
-            overflow-y: auto; 
+            padding: 20px 30px; 
+            position: relative;
         }
         
-        #display-viewport {
-            width: 100%;
-            height: 65vh;
-            background: #000;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            overflow: hidden;
-            position: relative;
-            margin-bottom: 15px;
-            display: block;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+        .input-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
         }
 
-        #web-frame { width: 100%; height: 100%; border: none; display: none; background: #fff; }
+        #display-viewport {
+            flex: 1;
+            background: #000;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #web-frame { width: 100%; height: 100%; border: none; display: none; }
         #player-wrapper { width: 100%; height: 100%; display: none; }
 
-        /* --- INTERACTION SHIELD --- */
+        /* --- OVERLAYS --- */
         #interaction-shield {
             position: absolute;
             inset: 0;
-            background: rgba(0,0,0,0.95);
+            background: rgba(0,0,0,0.85);
             z-index: 500;
             display: none;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            cursor: pointer;
-            text-align: center;
-            backdrop-filter: blur(8px);
+            backdrop-filter: blur(4px);
         }
 
-        /* --- CHAT SIDEBAR --- */
-        .chat-sidebar { 
-            width: 350px; 
-            background: var(--chat-bg); 
+        #empty-state {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #222;
+            font-family: 'Syncopate';
+            font-size: 0.8rem;
+            pointer-events: none;
+        }
+
+        /* --- SIDEBAR --- */
+        .sidebar { 
+            width: 380px; 
             border-left: 1px solid var(--border); 
             display: flex; 
             flex-direction: column; 
-            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); 
+            background: var(--bg);
         }
-        .chat-sidebar.collapsed { transform: translateX(100%); width: 0; border: none; }
         
         #chat-messages { 
             flex: 1; 
@@ -132,30 +139,28 @@
             padding: 20px; 
             display: flex; 
             flex-direction: column; 
-            gap: 12px; 
-            scrollbar-width: thin;
+            gap: 15px; 
         }
-        .msg { 
-            font-size: 0.85rem; 
-            background: rgba(255,255,255,0.03); 
-            padding: 10px; 
-            border-radius: 4px; 
-            border-left: 2px solid var(--neon); 
+        .msg { font-size: 0.8rem; font-family: 'Inter'; color: #888; font-style: italic; }
+        .msg-user { color: #aaa; margin-right: 8px; font-weight: normal; }
+
+        .chat-input-row { 
+            padding: 20px; 
+            border-top: 1px solid var(--border); 
+            display: flex; 
+            gap: 10px; 
         }
-        .msg-system { border-left-color: #444; color: #666; font-size: 0.75rem; font-style: italic; }
-        .msg-user { color: var(--neon); font-weight: bold; margin-right: 8px; text-transform: uppercase; font-size: 0.7rem; }
         
-        .chat-input-area { padding: 15px; border-top: 1px solid var(--border); display: flex; gap: 10px; }
-        
+        /* --- UI ELEMENTS --- */
         input { 
-            background: #050508; 
+            background: #000; 
             border: 1px solid var(--border); 
-            color: var(--text); 
-            padding: 12px; 
-            border-radius: 4px; 
+            color: #fff; 
+            padding: 14px; 
+            border-radius: 2px; 
             outline: none; 
-            font-family: 'Fira Code', monospace; 
-            font-size: 0.8rem; 
+            font-family: 'Inter', sans-serif; 
+            font-size: 0.85rem; 
             width: 100%; 
         }
         input:focus { border-color: var(--neon); }
@@ -167,79 +172,65 @@
             color: var(--neon); 
             cursor: pointer; 
             font-family: 'Syncopate', sans-serif;
-            font-weight: bold; 
             font-size: 0.65rem; 
             border-radius: 4px; 
-            text-transform: uppercase; 
             transition: all 0.2s; 
+            white-space: nowrap;
         }
-        .btn:hover { background: var(--neon); color: #000; box-shadow: 0 0 15px var(--neon); }
+        .btn:hover { background: rgba(0, 242, 255, 0.1); }
+        .btn-red { border-color: #ff3e3e; color: #ff3e3e; }
+        .btn-red:hover { background: rgba(255, 62, 62, 0.1); }
+        .btn-filled { background: var(--neon); color: #000; }
 
-        .sync-controls { 
-            display: flex; 
-            gap: 12px; 
-            flex-wrap: wrap; 
-            margin-top: 10px; 
-            align-items: center; 
-        }
-        .status-tag { 
-            font-family: 'Fira Code'; 
-            font-size: 0.6rem; 
-            color: #555; 
-            text-transform: uppercase; 
-            padding: 4px 8px; 
-            border: 1px solid #222; 
+        .footer-controls {
+            height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-top: 20px;
         }
 
-        #empty-state {
-            position: absolute;
-            top: 50%; left: 50%;
-            transform: translate(-50%, -50%);
-            text-align: center;
-            color: #333;
-            font-family: 'Syncopate';
-            font-size: 0.8rem;
-        }
+        .control-group { display: flex; gap: 15px; }
 
-        /* Plyr Theme Overrides */
+        /* Plyr Customization to match dark theme */
         .plyr--full-ui.plyr--video .plyr__control--overlaid { background: var(--neon); color: #000; }
-        .plyr--video .plyr__controls { background: linear-gradient(rgba(0,0,0,0), rgba(0,0,0,0.8)); }
+        .plyr--video .plyr__controls { background: transparent !important; }
     </style>
 </head>
 <body>
 
 <div id="auth-overlay">
     <div class="auth-card">
-        <h2 style="color:var(--neon); margin-bottom:25px; font-family: 'Syncopate'; font-size: 0.9rem;">ESTABLISH_UPLINK</h2>
-        <input type="text" id="user-id" placeholder="USER_ID">
-        <div style="height:15px;"></div>
+        <h2 style="color:var(--neon); margin-bottom:25px; font-family: 'Syncopate'; font-size: 0.8rem;">ESTABLISH_UPLINK</h2>
+        <input type="text" id="user-id" placeholder="USER_NAME">
+        <div style="height:12px;"></div>
         <input type="text" id="room-id" placeholder="ROOM_CODE">
         <div style="height:25px;"></div>
-        <button class="btn" style="width:100%; padding: 15px;" onclick="app.init()">INITIALIZE</button>
+        <button class="btn btn-filled" style="width:100%" onclick="app.init()">INITIALIZE</button>
     </div>
 </div>
 
 <header>
-    <div class="logo">SYNC_STREAM // TOTAL_CONTROL_V9</div>
-    <div style="display:flex; gap:15px; align-items:center;">
-        <div id="status-display" class="status-tag">OFFLINE</div>
-        <button class="btn" style="padding:6px 12px; font-size:0.6rem;" onclick="app.toggleChat()">CHAT</button>
+    <div class="logo">SYNC_STREAM // HYBRID_V5</div>
+    <div class="header-meta">
+        <div id="room-display">UPLINK_OFFLINE</div>
+        <button class="btn" style="border-width:1px;" onclick="app.toggleChat()">CHAT_TOGGLE</button>
     </div>
 </header>
 
 <div class="app-container">
-    <div class="video-section">
-        <div style="display:flex; gap:10px; margin-bottom:20px;">
-            <input type="text" id="media-url" placeholder="Direct URL, HLS, or YouTube...">
-            <button class="btn" onclick="app.broadcastLoad()">PUSH_LOAD</button>
+    <div class="main-stage">
+        <div class="input-row">
+            <input type="text" id="media-url" placeholder="Paste URL (YouTube, Brocoflix, MP4) ...">
+            <button class="btn" onclick="app.broadcastLoad()">SIGNAL_PUSH</button>
         </div>
 
         <div id="display-viewport">
-            <div id="empty-state">NO_ACTIVE_STREAM</div>
+            <div id="empty-state">WAITING_FOR_SIGNAL...<br><span style="font-size: 0.6rem; opacity: 0.5;">Paste a URL or wait for room host.</span></div>
             
             <div id="interaction-shield" onclick="app.unmuteAndSync()">
-                <button class="btn" style="padding: 20px 40px; font-size: 1rem; border-width: 2px;">JOIN SESSION (ENABLE AUDIO)</button>
-                <p style="color:var(--neon); margin-top:20px; font-family:'Fira Code'; font-size:0.7rem;">TIMESTAMP_UPLINK_PENDING...</p>
+                <button class="btn" style="padding: 15px 30px; font-size: 0.8rem;">ACTIVATE SESSION & AUDIO</button>
+                <p id="sync-status-msg" style="color:var(--neon); margin-top:15px; font-family:'Fira Code'; font-size:0.65rem;">SYNCING_TIMESTAMP...</p>
             </div>
             
             <div id="player-wrapper">
@@ -249,18 +240,22 @@
             <iframe id="web-frame" allow="autoplay; fullscreen; encrypted-media;"></iframe>
         </div>
 
-        <div class="sync-controls">
-            <button class="btn" onclick="app.emitSignal('PLAY')">FORCE_PLAY</button>
-            <button class="btn" onclick="app.emitSignal('PAUSE')">FORCE_PAUSE</button>
-            <button class="btn" onclick="app.emitSignal('SEEK')">SYNC_TIMESTAMPS</button>
-            <div id="active-src" style="margin-left: 15px; font-size: 0.6rem; color: #444; font-family: 'Fira Code'; max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"></div>
+        <div class="footer-controls">
+            <div class="control-group">
+                <button class="btn" onclick="app.emitSignal('PLAY')">PLAY_ALL</button>
+                <button class="btn btn-red" onclick="app.emitSignal('PAUSE')">PAUSE_ALL</button>
+                <button class="btn" onclick="app.emitSignal('SEEK')">SYNC_TIME</button>
+            </div>
+            <div class="control-group">
+                <div id="media-sync-indicator" class="btn" style="border:none; opacity:0.6; cursor:default;">MEDIA_SYNC</div>
+            </div>
         </div>
     </div>
 
-    <div class="chat-sidebar" id="chat-sidebar">
+    <div class="sidebar" id="sidebar">
         <div id="chat-messages"></div>
-        <div class="chat-input-area">
-            <input type="text" id="chat-input" placeholder="Broadcasting..." onkeydown="if(event.key==='Enter')app.sendChat()">
+        <div class="chat-input-row">
+            <input type="text" id="chat-input" placeholder="Transmission ..." onkeydown="if(event.key==='Enter')app.sendChat()">
             <button class="btn" onclick="app.sendChat()">SEND</button>
         </div>
     </div>
@@ -278,7 +273,8 @@
             isRemoteAction: false, 
             lastMsgId: null,
             targetTime: 0,
-            isPlaying: false
+            isPlaying: false,
+            syncThreshold: 2.0 // Seconds allowed before forcing a seek
         },
 
         init() {
@@ -294,17 +290,16 @@
         connect() {
             const realtime = new Ably.Realtime({ key: ABLY_KEY, clientId: this.config.user });
             realtime.connection.on('connected', () => {
-                this.config.channel = realtime.channels.get(`sync_v9_${this.config.room}`);
-                document.getElementById('status-display').innerText = `CONNECTED: ${this.config.room}`;
-                document.getElementById('status-display').style.color = 'var(--neon)';
+                this.config.channel = realtime.channels.get(`sync_v5_${this.config.room}`);
+                document.getElementById('room-display').innerText = `UPLINK_LIVE: ${this.config.room}`;
 
                 this.config.channel.subscribe('signal', (msg) => this.handleIncomingSignal(msg.data));
                 
-                // Presence logic for auto-syncing new users
                 this.config.channel.presence.subscribe('enter', (m) => {
                     this.addSystemMsg(`${m.clientId} joined.`);
+                    // If we are already watching something, tell the newcomer
                     if(m.clientId !== this.config.user && this.state.currentUrl) {
-                        this.emitSignal('STATE_DATA', { url: this.state.currentUrl, playing: this.state.isPlaying });
+                        this.emitSignal('STATE_SYNC', { url: this.state.currentUrl, playing: this.state.isPlaying });
                     }
                 });
                 
@@ -313,7 +308,10 @@
             });
         },
 
-        toggleChat() { document.getElementById('chat-sidebar').classList.toggle('collapsed'); },
+        toggleChat() {
+            const sb = document.getElementById('sidebar');
+            sb.style.display = sb.style.display === 'none' ? 'flex' : 'none';
+        },
 
         unmuteAndSync() {
             document.getElementById('interaction-shield').style.display = 'none';
@@ -321,9 +319,7 @@
                 player.muted = false;
                 player.volume = 1;
                 if(this.state.targetTime > 0) player.currentTime = this.state.targetTime;
-                player.play().catch(() => {
-                    console.log("Autoplay blocked, user interaction required.");
-                });
+                player.play();
             }
         },
 
@@ -331,7 +327,7 @@
             const url = document.getElementById('media-url').value.trim();
             if(!url) return;
             this.emitSignal('LOAD', { url });
-            this.loadMedia(url, 0); // Load locally immediately
+            this.loadMedia(url, 0); 
         },
 
         emitSignal(type, data = {}) {
@@ -349,9 +345,8 @@
         },
 
         handleIncomingSignal(data) {
-            if (data.sender === this.config.user || data.msgId === this.state.lastMsgId) return;
+            if (data.sender === this.config.user) return;
             
-            // Set safety lock
             this.state.isRemoteAction = true;
 
             switch(data.type) {
@@ -360,7 +355,7 @@
                     break;
                 case 'PLAY':
                     if(player) {
-                        if(Math.abs(player.currentTime - data.time) > 1.5) player.currentTime = data.time;
+                        if(Math.abs(player.currentTime - data.time) > this.state.syncThreshold) player.currentTime = data.time;
                         player.play();
                     }
                     break;
@@ -371,9 +366,9 @@
                     if(player) player.currentTime = data.time;
                     break;
                 case 'QUERY_STATE':
-                    if(this.state.currentUrl) this.emitSignal('STATE_DATA', { url: this.state.currentUrl, playing: this.state.isPlaying });
+                    if(this.state.currentUrl) this.emitSignal('STATE_SYNC', { url: this.state.currentUrl, playing: this.state.isPlaying });
                     break;
-                case 'STATE_DATA':
+                case 'STATE_SYNC':
                     if(!this.state.currentUrl || this.state.currentUrl !== data.url) {
                         this.loadMedia(data.url, data.time);
                     }
@@ -383,16 +378,12 @@
                     break;
             }
 
-            // Release safety lock after buffer
-            setTimeout(() => { this.state.isRemoteAction = false; }, 800);
+            setTimeout(() => { this.state.isRemoteAction = false; }, 1000);
         },
 
         loadMedia(url, startTime = 0) {
-            if(url === this.state.currentUrl && player) return;
-
             this.state.currentUrl = url;
             this.state.targetTime = startTime;
-            document.getElementById('active-src').innerText = `SOURCE: ${url}`;
             document.getElementById('empty-state').style.display = 'none';
 
             const isYT = url.includes('youtube.com') || url.includes('youtu.be');
@@ -422,9 +413,8 @@
                 mount.innerHTML = `<video id="plyr-target" playsinline controls crossorigin muted></video>`;
                 const video = mount.querySelector('video');
                 
-                // Logic for HLS (Master Playlists)
-                if ((url.includes('.m3u8') || url.includes('brocoflix') || url.includes('playlist')) && Hls.isSupported()) {
-                    hls = new Hls({ enableWorker: true });
+                if ((url.includes('.m3u8') || url.includes('brocoflix')) && Hls.isSupported()) {
+                    hls = new Hls();
                     hls.loadSource(url);
                     hls.attachMedia(video);
                 } else {
@@ -432,19 +422,13 @@
                 }
             }
 
-            player = new Plyr('#plyr-target', { 
-                autoplay: true, 
-                muted: true, 
-                ratio: '16:9',
-                keyboard: { global: true }
-            });
+            player = new Plyr('#plyr-target', { autoplay: true, muted: true });
 
             player.on('ready', () => { 
                 if(startTime > 0) player.currentTime = startTime;
                 player.play();
             });
 
-            // Sync Logic Binders
             player.on('play', () => { 
                 this.state.isPlaying = true;
                 if(!this.state.isRemoteAction) this.emitSignal('PLAY'); 
@@ -470,7 +454,7 @@
         addChat(user, text) {
             const div = document.createElement('div');
             div.className = 'msg';
-            div.innerHTML = `<span class="msg-user">${user}:</span> <span></span>`;
+            div.innerHTML = `<span class="msg-user">> ${user}:</span> <span style="color:#eee; font-style: normal;"></span>`;
             div.querySelector('span:last-child').textContent = text;
             const container = document.getElementById('chat-messages');
             container.appendChild(div);
@@ -479,11 +463,9 @@
 
         addSystemMsg(text) {
             const div = document.createElement('div');
-            div.className = 'msg msg-system';
-            div.textContent = `> SYSTEM: ${text}`;
-            const container = document.getElementById('chat-messages');
-            container.appendChild(div);
-            container.scrollTop = container.scrollHeight;
+            div.className = 'msg';
+            div.textContent = `> ${text}`;
+            document.getElementById('chat-messages').appendChild(div);
         }
     };
 </script>
