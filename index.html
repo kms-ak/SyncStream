@@ -231,7 +231,7 @@
         <div style="height:12px;"></div>
         <input type="text" id="room-id" placeholder="ROOM_CODE">
         <div style="height:25px;"></div>
-        <button id="init-btn" class="btn btn-filled" style="width:100%" onclick="app.init()">INITIALIZE</button>
+        <button id="init-btn" class="btn btn-filled" style="width:100%">INITIALIZE</button>
         <div id="auth-debug">System ready...</div>
     </div>
 </div>
@@ -309,7 +309,7 @@
         },
 
         async init() {
-            this.logDebug("Init button clicked.");
+            this.logDebug("Init triggered...");
             
             const u = document.getElementById('user-id').value.trim();
             const r = document.getElementById('room-id').value.trim().toUpperCase();
@@ -323,24 +323,28 @@
             this.config.room = r;
 
             try {
-                this.logDebug("Checking Firebase SDK...");
+                this.logDebug("Verifying SDK...");
                 if (typeof firebase === 'undefined') {
-                    throw new Error("Firebase SDK failed to load. Check your internet or firewall.");
+                    throw new Error("SDK Not Loaded. Check connection.");
                 }
 
                 if (!this.db) {
-                    this.logDebug("Configuring client...");
+                    this.logDebug("Injecting Config...");
+                    // THE API KEY IS AUTOMATICALLY PROVIDED HERE BY THE ENVIRONMENT
+                    if (typeof __firebase_config === 'undefined') {
+                        throw new Error("Cloud config not found. Wait 5s and try again.");
+                    }
                     const firebaseConfig = JSON.parse(__firebase_config);
                     firebase.initializeApp(firebaseConfig);
                     this.db = firebase.firestore();
                     this.auth = firebase.auth();
                 }
 
-                this.logDebug("Attempting Uplink...");
+                this.logDebug("Handshaking...");
                 const cred = await this.auth.signInAnonymously();
                 this.config.uid = cred.user.uid;
                 
-                this.logDebug("Success. Entering Room...");
+                this.logDebug("Uplink Established.");
                 document.getElementById('auth-overlay').style.display = 'none';
                 this.startSession();
             } catch (e) {
@@ -491,12 +495,15 @@
         }
     };
 
-    // Global listener for the button in case the attribute is stripped
+    // Attach listener with extreme prejudice
     window.addEventListener('load', () => {
-        app.logDebug("Page loaded. System standby.");
+        app.logDebug("Standby.");
         const btn = document.getElementById('init-btn');
         if (btn) {
-            btn.onclick = () => app.init();
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                app.init();
+            });
         }
     });
 </script>
