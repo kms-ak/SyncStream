@@ -59,9 +59,24 @@
             box-shadow: 0 10px 30px rgba(0,0,0,0.5);
             margin-bottom: 20px;
             display: none;
+            position: relative;
         }
 
-        /* Sidebar Styling */
+        /* Interaction Shield for Autoplay */
+        #interaction-shield {
+            position: absolute;
+            inset: 0;
+            background: rgba(0,0,0,0.9);
+            z-index: 10;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            text-align: center;
+            padding: 20px;
+        }
+
         .chat-sidebar { 
             width: 350px; 
             background: var(--chat-bg); 
@@ -93,10 +108,6 @@
         .online { color: var(--neon); border-color: var(--neon); }
 
         .plyr--full-ui.plyr--video { --plyr-color-main: var(--neon); }
-
-        /* Theater Mode Toggle */
-        #theater-toggle { position: fixed; right: 20px; bottom: 20px; z-index: 100; opacity: 0.5; }
-        #theater-toggle:hover { opacity: 1; }
     </style>
 </head>
 <body>
@@ -121,11 +132,15 @@
 <div class="app-container">
     <div class="video-section" id="video-section">
         <div style="display:flex; gap:10px; margin-bottom:20px;">
-            <input type="text" id="media-url" placeholder="YouTube, MP4, or .m3u8 stream link..." style="flex:1">
+            <input type="text" id="media-url" placeholder="Paste link..." style="flex:1">
             <button class="btn" onclick="app.syncMedia()">SYNC_SIGNAL</button>
         </div>
 
         <div id="player-wrapper">
+            <div id="interaction-shield" onclick="app.unlockAudio()">
+                <div class="btn">CLICK TO UNMUTE & JOIN STREAM</div>
+                <p style="margin-top:10px; font-size:0.7rem; color:var(--neon)">Browsers require a click to enable sound.</p>
+            </div>
             <div id="player-mount"></div>
         </div>
 
@@ -139,9 +154,7 @@
     </div>
 
     <div class="chat-sidebar" id="chat-sidebar">
-        <div class="chat-header">
-            <span>Transmission Log</span>
-        </div>
+        <div class="chat-header"><span>Transmission Log</span></div>
         <div id="chat-messages"></div>
         <div class="chat-input-area">
             <input type="text" id="chat-input" placeholder="Type message..." style="flex:1" onkeydown="if(event.key==='Enter')app.sendChat()">
@@ -171,7 +184,7 @@
 
         initAbly() {
             if (!KEYS.ABLY || KEYS.ABLY.startsWith('%%')) {
-                this.systemMessage("Ably Key Missing: Offline Mode Enabled.");
+                this.systemMessage("Ably Key Missing: Offline Mode.");
                 return;
             }
             const ably = new Ably.Realtime({ key: KEYS.ABLY });
@@ -179,25 +192,24 @@
                 this.config.channel = ably.channels.get(`stream_${this.config.room}`);
                 document.getElementById('connection-status').innerText = `LIVE: ${this.config.room}`;
                 document.getElementById('connection-status').className = 'status-pill online';
-                
                 this.config.channel.subscribe('sync', (msg) => this.handleSync(msg.data));
-                
-                this.systemMessage(`Uplink established. Protocol v2.0 active.`);
-                this.config.channel.publish('sync', { type: 'SYSTEM', msg: `${this.config.user} joined the party.` });
-                
-                // When joining, check if a movie is already running
+                this.systemMessage(`Uplink established. Welcome ${this.config.user}`);
                 setTimeout(() => this.emitSync('REQUEST_STATE'), 1000);
             });
         },
 
+        unlockAudio() {
+            if (playerInstance) {
+                playerInstance.muted = false;
+                playerInstance.volume = 1;
+                playerInstance.play().catch(e => console.log("Play failed:", e));
+            }
+            document.getElementById('interaction-shield').style.display = 'none';
+        },
+
         toggleSidebar() {
             this.config.isSidebarVisible = !this.config.isSidebarVisible;
-            const sidebar = document.getElementById('chat-sidebar');
-            if (this.config.isSidebarVisible) {
-                sidebar.classList.remove('collapsed');
-            } else {
-                sidebar.classList.add('collapsed');
-            }
+            document.getElementById('chat-sidebar').classList.toggle('collapsed');
         },
 
         syncMedia() {
@@ -207,15 +219,16 @@
         },
 
         loadMedia(url, startTime = 0) {
-            if (this.config.currentSource === url && startTime === 0) return; // Prevent double load
+            if (this.config.currentSource === url && startTime === 0) return;
             
             this.config.currentSource = url;
             const isYouTube = url.includes('youtube.com') || url.includes('youtu.be');
-            const isHLS = url.includes('.m3u8') || url.includes('.ts');
+            const isHLS = url.includes('.m3u8');
             
             document.getElementById('player-wrapper').style.display = 'block';
             document.getElementById('global-controls').style.display = 'flex';
             document.getElementById('media-info').innerText = `SOURCE: ${url}`;
+            document.getElementById('interaction-shield').style.display = 'flex';
             
             if (playerInstance) playerInstance.destroy();
             if (hlsInstance) hlsInstance.destroy();
@@ -223,25 +236,27 @@
             const mount = document.getElementById('player-mount');
             
             if (isYouTube) {
-                mount.innerHTML = `<div class="plyr__video-embed"><iframe src="https://www.youtube.com/embed/${this.extractYTId(url)}?origin=${window.location.origin}&amp;iv_load_policy=3&amp;modestbranding=1&amp;playsinline=1&amp;showinfo=0&amp;rel=0&amp;enablejsapi=1" allowfullscreen allowtransparency allow="autoplay"></iframe></div>`;
-                playerInstance = new Plyr(mount.firstElementChild);
+                mount.innerHTML = `<div class="plyr__video-embed"><iframe src="https://www.youtube.com/embed/${this.extractYTId(url)}?autoplay=1&mute=1&enablejsapi=1&origin=${window.location.origin}"></iframe></div>`;
+                playerInstance = new Plyr(mount.firstElementChild, { autoplay: true, muted: true });
             } else {
-                mount.innerHTML = `<video playsinline controls crossorigin="anonymous"></video>`;
+                mount.innerHTML = `<video playsinline controls autoplay muted crossorigin="anonymous"></video>`;
                 const video = mount.querySelector('video');
                 
                 if (isHLS && Hls.isSupported()) {
                     hlsInstance = new Hls();
                     hlsInstance.loadSource(url);
                     hlsInstance.attachMedia(video);
-                    playerInstance = new Plyr(video);
                 } else {
                     video.src = url;
-                    playerInstance = new Plyr(video);
                 }
+                playerInstance = new Plyr(video, { autoplay: true, muted: true });
             }
 
             playerInstance.on('ready', () => {
                 if(startTime > 0) playerInstance.currentTime = startTime;
+                playerInstance.play().catch(() => {
+                    console.log("Autoplay blocked by browser. Awaiting user click.");
+                });
             });
         },
 
@@ -284,25 +299,18 @@
                     if(playerInstance) playerInstance.currentTime = data.time;
                     break;
                 case 'REQUEST_STATE':
-                    // If someone asks for state and we have a video playing, send them the details
-                    if(data.user !== this.config.user && this.config.currentSource) {
-                        this.emitSync('STATE_RESPONSE');
-                    }
+                    if(data.user !== this.config.user && this.config.currentSource) this.emitSync('STATE_RESPONSE');
                     break;
                 case 'STATE_RESPONSE':
-                    // We only accept state if we don't have one yet
-                    if(!this.config.currentSource) {
-                        this.loadMedia(data.url, data.time);
-                    }
+                    if(!this.config.currentSource) this.loadMedia(data.url, data.time);
                     break;
             }
         },
 
         sendChat() {
             const input = document.getElementById('chat-input');
-            const msg = input.value.trim();
-            if(!msg || !this.config.channel) return;
-            this.config.channel.publish('sync', { type: 'CHAT', user: this.config.user, msg: msg });
+            if(!input.value.trim() || !this.config.channel) return;
+            this.config.channel.publish('sync', { type: 'CHAT', user: this.config.user, msg: input.value });
             input.value = '';
         },
 
