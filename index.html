@@ -3,15 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SYNC_STREAM // TOTAL_UNIVERSAL</title>
+    <title>SYNC_STREAM // TOTAL_CONTROL_V7</title>
+    
+    <!-- Ably for Real-time Messaging -->
     <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
     
-    <!-- Plyr & HLS.js for Universal Support -->
+    <!-- Plyr & HLS.js for Universal Video Support -->
     <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
     <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 
+    <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Fira+Code:wght@400;700&family=Syncopate:wght@700&display=swap" rel="stylesheet">
+
     <style>
         :root { 
             --neon: #00f2ff; 
@@ -22,20 +26,42 @@
             --error: #ff4d4d;
             --chat-bg: #0d0d14;
         }
+
         * { box-sizing: border-box; margin: 0; padding: 0; }
+        
         body { 
             background: var(--bg); 
             color: var(--text); 
             font-family: 'Inter', sans-serif; 
             height: 100vh;
+            width: 100vw;
             overflow: hidden;
             display: flex;
             flex-direction: column;
         }
+
+        /* --- AUTH OVERLAY --- */
+        #auth-overlay { 
+            position: fixed; 
+            inset: 0; 
+            z-index: 10000; 
+            background: var(--bg); 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+        }
+        .auth-card { 
+            border: 1px solid var(--neon); 
+            padding: 40px; 
+            width: 90%; 
+            max-width: 400px; 
+            background: var(--panel); 
+            text-align: center; 
+            box-shadow: 0 0 30px rgba(0,242,255,0.15); 
+            border-radius: 8px; 
+        }
         
-        #auth-overlay { position: fixed; inset: 0; z-index: 9999; background: var(--bg); display: flex; align-items: center; justify-content: center; }
-        .auth-card { border: 1px solid var(--neon); padding: 40px; width: 90%; max-width: 400px; background: var(--panel); text-align: center; box-shadow: 0 0 30px rgba(0,242,255,0.1); border-radius: 8px; }
-        
+        /* --- HEADER --- */
         header { 
             height: 60px;
             padding: 0 20px; 
@@ -45,11 +71,18 @@
             align-items: center; 
             background: var(--panel);
         }
-        .logo { font-family: 'Syncopate', sans-serif; color: var(--neon); letter-spacing: 2px; font-size: 0.7rem; }
+        .logo { font-family: 'Syncopate', sans-serif; color: var(--neon); letter-spacing: 2px; font-size: 0.75rem; }
         
+        /* --- LAYOUT --- */
         .app-container { display: flex; flex: 1; overflow: hidden; position: relative; }
 
-        .video-section { flex: 1; display: flex; flex-direction: column; padding: 20px; overflow-y: auto; transition: all 0.3s ease; }
+        .video-section { 
+            flex: 1; 
+            display: flex; 
+            flex-direction: column; 
+            padding: 20px; 
+            overflow-y: auto; 
+        }
         
         #display-viewport {
             width: 100%;
@@ -61,330 +94,402 @@
             position: relative;
             margin-bottom: 15px;
             display: block;
-            min-height: 200px;
-            box-shadow: 0 0 40px rgba(0,0,0,0.8);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
         }
 
         #web-frame { width: 100%; height: 100%; border: none; display: none; background: #fff; }
         #player-wrapper { width: 100%; height: 100%; display: none; }
 
+        /* --- INTERACTION SHIELD (FORCED OVERLAY) --- */
         #interaction-shield {
             position: absolute;
             inset: 0;
-            background: rgba(0,0,0,0.85);
-            z-index: 20;
-            display: flex;
+            background: rgba(0,0,0,0.95);
+            z-index: 500;
+            display: none;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             cursor: pointer;
             text-align: center;
-            border-radius: 8px;
-            backdrop-filter: blur(4px);
+            backdrop-filter: blur(8px);
         }
 
-        .chat-sidebar { width: 350px; background: var(--chat-bg); border-left: 1px solid var(--border); display: flex; flex-direction: column; transition: 0.3s; }
-        .chat-sidebar.collapsed { width: 0; transform: translateX(100%); }
+        /* --- CHAT SIDEBAR --- */
+        .chat-sidebar { 
+            width: 350px; 
+            background: var(--chat-bg); 
+            border-left: 1px solid var(--border); 
+            display: flex; 
+            flex-direction: column; 
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); 
+        }
+        .chat-sidebar.collapsed { transform: translateX(100%); width: 0; border: none; }
         
-        #chat-messages { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 8px; }
-        .msg { font-size: 0.8rem; background: rgba(255,255,255,0.03); padding: 8px; border-radius: 4px; border-left: 2px solid var(--neon); word-break: break-word; }
-        .msg-system { border-left-color: #555; background: rgba(255,255,255,0.01); font-style: italic; color: #888; font-size: 0.7rem; }
-        .msg-user { color: var(--neon); font-weight: bold; margin-right: 5px; text-transform: uppercase; font-size: 0.7rem; }
+        #chat-messages { 
+            flex: 1; 
+            overflow-y: auto; 
+            padding: 20px; 
+            display: flex; 
+            flex-direction: column; 
+            gap: 12px; 
+            scrollbar-width: thin;
+            scrollbar-color: var(--border) transparent;
+        }
+        .msg { 
+            font-size: 0.85rem; 
+            background: rgba(255,255,255,0.03); 
+            padding: 10px; 
+            border-radius: 4px; 
+            border-left: 2px solid var(--neon); 
+            word-break: break-word; 
+            line-height: 1.4;
+        }
+        .msg-system { border-left-color: #444; background: transparent; font-style: italic; color: #666; font-size: 0.75rem; }
+        .msg-user { color: var(--neon); font-weight: bold; margin-right: 8px; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 1px; }
         
-        .chat-input-area { padding: 15px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
-        input { background: #000; border: 1px solid var(--border); color: var(--text); padding: 10px; border-radius: 4px; outline: none; font-family: 'Fira Code', monospace; font-size: 0.8rem; width: 100%; }
+        .chat-input-area { padding: 15px; border-top: 1px solid var(--border); display: flex; gap: 10px; }
+        
+        /* --- UI ELEMENTS --- */
+        input { 
+            background: #050508; 
+            border: 1px solid var(--border); 
+            color: var(--text); 
+            padding: 12px; 
+            border-radius: 4px; 
+            outline: none; 
+            font-family: 'Fira Code', monospace; 
+            font-size: 0.8rem; 
+            width: 100%; 
+            transition: border-color 0.2s;
+        }
         input:focus { border-color: var(--neon); }
         
-        .btn { padding: 10px 20px; background: transparent; border: 1px solid var(--neon); color: var(--neon); cursor: pointer; font-weight: bold; font-size: 0.7rem; border-radius: 4px; text-transform: uppercase; transition: 0.2s; white-space: nowrap; }
-        .btn:hover { background: var(--neon); color: #000; box-shadow: 0 0 15px rgba(0,242,255,0.3); }
+        .btn { 
+            padding: 10px 20px; 
+            background: transparent; 
+            border: 1px solid var(--neon); 
+            color: var(--neon); 
+            cursor: pointer; 
+            font-family: 'Syncopate', sans-serif;
+            font-weight: bold; 
+            font-size: 0.65rem; 
+            border-radius: 4px; 
+            text-transform: uppercase; 
+            transition: all 0.2s; 
+            white-space: nowrap; 
+        }
+        .btn:hover { background: var(--neon); color: #000; box-shadow: 0 0 20px rgba(0,242,255,0.4); }
         .btn-red { border-color: var(--error); color: var(--error); }
+        .btn-red:hover { background: var(--error); color: #fff; box-shadow: 0 0 20px rgba(255,77,77,0.4); }
 
-        .sync-controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; align-items: center; }
-        .mode-tag { color: var(--neon); border: 1px solid var(--neon); padding: 4px 10px; border-radius: 3px; font-size: 0.65rem; margin-right: 10px; font-weight: bold; text-transform: uppercase; }
-        
-        #empty-state-msg {
+        .sync-controls { 
+            display: flex; 
+            gap: 12px; 
+            flex-wrap: wrap; 
+            margin-top: 10px; 
+            align-items: center; 
+        }
+        .status-tag { 
+            font-family: 'Fira Code'; 
+            font-size: 0.6rem; 
+            color: #555; 
+            text-transform: uppercase; 
+            padding: 4px 8px; 
+            border: 1px solid #222; 
+            border-radius: 3px; 
+        }
+
+        #empty-state {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            color: #444;
-            font-size: 0.8rem;
             text-align: center;
+            color: #333;
+            font-family: 'Syncopate';
+            font-size: 0.8rem;
         }
+
+        /* Plyr Customization to match theme */
+        .plyr--full-ui.plyr--video .plyr__control--overlaid { background: var(--neon); color: #000; }
+        .plyr--video .plyr__controls { background: linear-gradient(rgba(0,0,0,0), rgba(0,0,0,.7)); }
+        .plyr__control:hover { background: var(--neon) !important; color: #000 !important; }
     </style>
 </head>
 <body>
 
 <div id="auth-overlay">
     <div class="auth-card">
-        <h2 style="color:var(--neon); margin-bottom:25px; font-family: 'Syncopate'; font-size: 0.9rem;">NETWORK_LINK</h2>
-        <input type="text" id="user-id" placeholder="USER_NAME" style="width:100%; margin-bottom:15px;">
-        <input type="text" id="room-id" placeholder="ROOM_ID" style="width:100%; margin-bottom:20px;">
-        <button class="btn" style="width:100%" onclick="app.init()">ESTABLISH_CONNECTION</button>
+        <h2 style="color:var(--neon); margin-bottom:25px; font-family: 'Syncopate'; font-size: 0.9rem; letter-spacing: 3px;">ESTABLISH_LINK</h2>
+        <input type="text" id="user-id" placeholder="IDENTITY" style="margin-bottom:15px;">
+        <input type="text" id="room-id" placeholder="ROOM_ID" style="margin-bottom:25px;">
+        <button class="btn" style="width:100%; padding: 15px;" onclick="app.init()">INITIALIZE</button>
     </div>
 </div>
 
 <header>
-    <div class="logo">SYNC_STREAM // HYBRID_V5</div>
-    <div style="display:flex; gap:12px; align-items:center;">
-        <div id="status-box" style="font-size:0.6rem; color:#444; text-transform: uppercase;">UPLINK_OFFLINE</div>
-        <button class="btn" id="chat-toggle-btn" style="padding:6px 12px; font-size:0.6rem;" onclick="app.toggleChat()">CHAT_TOGGLE</button>
+    <div class="logo">SYNC_STREAM // UNIVERSAL_V7</div>
+    <div style="display:flex; gap:15px; align-items:center;">
+        <div id="status-display" class="status-tag">LINK_OFFLINE</div>
+        <button class="btn" style="padding:6px 12px; font-size:0.6rem;" onclick="app.toggleChat()">CHAT</button>
     </div>
 </header>
 
 <div class="app-container">
     <div class="video-section">
-        <div style="display:flex; gap:10px; margin-bottom:15px;">
-            <input type="text" id="media-url" placeholder="Paste URL (YouTube, Brocoflix, MP4)..." style="flex:1">
-            <button class="btn" onclick="app.syncAction()">SIGNAL_PUSH</button>
+        <div style="display:flex; gap:10px; margin-bottom:20px;">
+            <input type="text" id="media-url" placeholder="Paste URL (YouTube, Brocoflix, MP4, HLS)...">
+            <button class="btn" onclick="app.broadcastLoad()">SIGNAL_PUSH</button>
         </div>
 
         <div id="display-viewport">
-            <div id="empty-state-msg">WAITING_FOR_SIGNAL...<br><small>Paste a URL or wait for room host.</small></div>
+            <div id="empty-state">READY_FOR_INPUT...</div>
             
-            <div id="interaction-shield" onclick="app.unmute()" style="display:none;">
-                <button class="btn">ACTIVATE SESSION & AUDIO</button>
-                <p style="margin-top:15px; font-size:0.6rem; color:var(--neon); letter-spacing:1px; font-family: 'Fira Code';">SYNCING_TIMESTAMP...</p>
+            <div id="interaction-shield" onclick="app.unmuteAndSync()">
+                <button class="btn" style="padding: 20px 40px; font-size: 1rem; border-width: 2px;">JOIN SESSION & ENABLE AUDIO</button>
+                <p style="color:var(--neon); margin-top:20px; font-family:'Fira Code'; font-size:0.7rem; letter-spacing: 2px;">SYNCING_BUFFER_TIMESTAMP...</p>
             </div>
             
             <div id="player-wrapper">
                 <div id="player-mount"></div>
             </div>
 
-            <iframe id="web-frame" allow="autoplay; fullscreen; encrypted-media; picture-in-picture"></iframe>
+            <iframe id="web-frame" allow="autoplay; fullscreen; encrypted-media;"></iframe>
         </div>
 
-        <div class="sync-controls" id="controls">
-            <button class="btn" id="btn-play" onclick="app.manualEmit('PLAY')">PLAY_ALL</button>
-            <button class="btn btn-red" id="btn-pause" onclick="app.manualEmit('PAUSE')">PAUSE_ALL</button>
-            <button class="btn" onclick="app.manualEmit('SEEK')">SYNC_TIME</button>
-            <div style="flex:1"></div>
-            <div id="current-mode"></div>
+        <div class="sync-controls">
+            <button class="btn" onclick="app.emitSignal('PLAY')">PLAY_ALL</button>
+            <button class="btn btn-red" onclick="app.emitSignal('PAUSE')">PAUSE_ALL</button>
+            <button class="btn" onclick="app.emitSignal('SEEK')">SYNC_TIME</button>
+            <div id="active-src" style="margin-left: 15px; font-size: 0.6rem; color: #444; font-family: 'Fira Code'; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px;"></div>
         </div>
     </div>
 
     <div class="chat-sidebar" id="chat-sidebar">
         <div id="chat-messages"></div>
         <div class="chat-input-area">
-            <input type="text" id="chat-input" placeholder="Transmission..." style="flex:1" onkeydown="if(event.key==='Enter')app.sendChat()">
+            <input type="text" id="chat-input" placeholder="Transmission..." onkeydown="if(event.key==='Enter')app.sendChat()">
             <button class="btn" onclick="app.sendChat()">SEND</button>
         </div>
     </div>
 </div>
 
 <script>
-    // Ably Config
-    const KEYS = { ABLY: '%%ABLY_KEY%%' };
-    const FALLBACK_KEY = 'j0IuLw.2D-5qA:I-0n9Rz0h6L7O5e0';
-    
+    const ABLY_KEY = 'j0IuLw.2D-5qA:I-0n9Rz0h6L7O5e0';
     let player = null;
     let hls = null;
 
     const app = {
-        state: { 
-            user: '', 
-            room: '', 
-            channel: null, 
-            url: '', 
-            mode: 'IDLE', 
-            lastEmitTime: 0,
-            isProcessingRemoteSignal: false, // CRITICAL: Prevent feedback loops
+        config: { user: '', room: '', channel: null },
+        state: {
+            currentUrl: '',
+            isRemoteAction: false, // LOCK to prevent feedback loops
+            lastMsgId: null,
             targetTime: 0
         },
 
         init() {
             const u = document.getElementById('user-id').value.trim();
-            const r = document.getElementById('room-id').value.trim();
+            const r = document.getElementById('room-id').value.trim().toUpperCase();
             if(!u || !r) return;
-            this.state.user = u;
-            this.state.room = r.toUpperCase();
-            document.getElementById('auth-overlay').style.display = 'none';
+            
+            this.config.user = u;
+            this.config.room = r;
+            
+            document.getElementById('auth-overlay').remove();
             this.connect();
         },
 
         connect() {
-            const key = (!KEYS.ABLY || KEYS.ABLY.startsWith('%%')) ? FALLBACK_KEY : KEYS.ABLY;
             try {
-                const realtime = new Ably.Realtime({ key: key, clientId: this.state.user });
+                const realtime = new Ably.Realtime({ key: ABLY_KEY, clientId: this.config.user });
+                
                 realtime.connection.on('connected', () => {
-                    this.state.channel = realtime.channels.get(`sync_${this.state.room}`);
-                    document.getElementById('status-box').innerText = `UPLINK_LIVE: ${this.state.room}`;
-                    document.getElementById('status-box').style.color = 'var(--neon)';
+                    this.config.channel = realtime.channels.get(`sync_v7_${this.config.room}`);
                     
-                    this.state.channel.subscribe('sync', (msg) => {
-                        this.handleSignal(msg.data);
+                    const status = document.getElementById('status-display');
+                    status.innerText = `LINK_ESTABLISHED: ${this.config.room}`;
+                    status.style.color = 'var(--neon)';
+                    status.style.borderColor = 'var(--neon)';
+
+                    this.config.channel.subscribe('signal', (msg) => {
+                        this.handleIncomingSignal(msg.data);
                     });
 
-                    this.state.channel.presence.subscribe((member) => {
-                        if (member.action === 'enter') {
-                            this.addSystemMsg(`${member.clientId} joined.`);
-                            if (member.clientId === this.state.user) this.manualEmit('QUERY_STATE');
-                        }
+                    this.config.channel.presence.subscribe((m) => {
+                        if(m.action === 'enter') this.addSystemMsg(`${m.clientId} linked to room.`);
+                        if(m.clientId === this.config.user) this.emitSignal('QUERY_STATE');
                     });
-                    this.state.channel.presence.enter();
+
+                    this.config.channel.presence.enter();
                 });
-            } catch (e) { console.error(e); }
+            } catch (err) {
+                console.error("Connection error:", err);
+            }
         },
 
-        toggleChat() { document.getElementById('chat-sidebar').classList.toggle('collapsed'); },
+        toggleChat() {
+            document.getElementById('chat-sidebar').classList.toggle('collapsed');
+        },
 
-        unmute() {
+        unmuteAndSync() {
+            // PHYSICALLY DESTROY OVERLAY
+            const shield = document.getElementById('interaction-shield');
+            shield.style.display = 'none';
+            
             if (player) {
                 player.muted = false;
                 player.volume = 1;
-                // Sync to room time if it exists
                 if(this.state.targetTime > 0) player.currentTime = this.state.targetTime;
-                player.play().catch(() => {});
-            }
-            document.getElementById('interaction-shield').style.display = 'none';
-        },
-
-        syncAction() {
-            const val = document.getElementById('media-url').value.trim();
-            if(val) {
-                this.load(val); 
-                this.manualEmit('LOAD', val);
+                player.play().catch(e => console.warn("Autoplay blocked:", e));
             }
         },
 
-        load(url, time = 0) {
-            if (!url) return;
-            if (url === this.state.url && this.state.mode !== 'IDLE') {
-                if(time > 0 && player) player.currentTime = time;
-                return;
-            }
+        broadcastLoad() {
+            const url = document.getElementById('media-url').value.trim();
+            if(!url) return;
+            this.emitSignal('LOAD', { url });
+        },
 
-            this.state.url = url;
-            this.state.targetTime = time;
-            const isDirect = /\.(mp4|m3u8|webm|ts|ogv|m4v)(\?.*)?$/i.test(url);
-            const isYT = url.includes('youtube.com') || url.includes('youtu.be');
+        // --- CORE SYNC ENGINE ---
+        emitSignal(type, data = {}) {
+            if(!this.config.channel) return;
             
-            document.getElementById('empty-state-msg').style.display = 'none';
-            const modeTag = document.getElementById('current-mode');
+            const msgId = Math.random().toString(36).substring(7);
+            this.state.lastMsgId = msgId;
 
-            if (isDirect || isYT) {
-                this.state.mode = 'MEDIA';
-                modeTag.innerHTML = `<span class="mode-tag">MEDIA_SYNC</span>`;
-                document.getElementById('web-frame').style.display = 'none';
-                document.getElementById('player-wrapper').style.display = 'block';
-                this.setupPlayer(url, isYT, time);
-            } else {
-                this.state.mode = 'WEB';
-                modeTag.innerHTML = `<span class="mode-tag" style="color:#ffcc00; border-color:#ffcc00;">WEB_VIEW</span>`;
-                document.getElementById('player-wrapper').style.display = 'none';
-                document.getElementById('web-frame').style.display = 'block';
-                document.getElementById('web-frame').src = url;
-                document.getElementById('interaction-shield').style.display = 'none';
-                if(player) { player.destroy(); player = null; }
-            }
-        },
-
-        setupPlayer(url, isYT, time) {
-            if (player) player.destroy();
-            if (hls) hls.destroy();
-            
-            const mount = document.getElementById('player-mount');
-            document.getElementById('interaction-shield').style.display = 'flex';
-
-            if (isYT) {
-                const id = url.match(/(?:youtu\.be\/|youtube\.com\/(?:v\/|u\/\w\/|embed\/|watch\?v=))([^#\&\?]*)/)?.[1];
-                mount.innerHTML = `<div class="plyr__video-embed" id="yt-player"><iframe src="https://www.youtube.com/embed/${id}?autoplay=1&mute=1&enablejsapi=1"></iframe></div>`;
-                player = new Plyr('#yt-player', { autoplay: true, muted: true });
-            } else {
-                mount.innerHTML = `<video playsinline controls autoplay muted crossorigin></video>`;
-                const v = mount.querySelector('video');
-                if (url.includes('.m3u8') && Hls.isSupported()) {
-                    hls = new Hls(); hls.loadSource(url); hls.attachMedia(v);
-                } else { v.src = url; }
-                player = new Plyr(v, { autoplay: true, muted: true });
-            }
-
-            // Bidirectional Listener
-            player.on('play', () => this.handleLocalEvent('PLAY'));
-            player.on('pause', () => this.handleLocalEvent('PAUSE'));
-            player.on('seeked', () => this.handleLocalEvent('SEEK'));
-
-            player.on('ready', () => { 
-                if(time > 0) player.currentTime = time; 
-            });
-        },
-
-        handleLocalEvent(type) {
-            // Only emit if we AREN'T currently reacting to a remote signal
-            if (this.state.isProcessingRemoteSignal) return;
-            this.manualEmit(type);
-        },
-
-        manualEmit(type, payload = null) {
-            if (!this.state.channel) return;
-            
-            // Throttle seeks
-            const now = Date.now();
-            if(now - this.state.lastEmitTime < 400 && type === 'SEEK') return;
-            this.state.lastEmitTime = now;
-
-            const data = {
-                type, 
-                user: this.state.user,
-                url: type === 'LOAD' ? payload : this.state.url,
-                time: player ? player.currentTime : 0
+            const payload = {
+                type,
+                msgId,
+                sender: this.config.user,
+                time: player ? player.currentTime : 0,
+                ...data
             };
-            if(type === 'CHAT') data.msg = payload;
-            
-            this.state.channel.publish('sync', data);
+
+            this.config.channel.publish('signal', payload);
         },
 
-        handleSignal(data) {
-            if(data.type === 'CHAT') return this.addChat(data.user, data.msg);
-            if(data.user === this.state.user) return; // Ignore own echoes from Ably
+        handleIncomingSignal(data) {
+            // IGNORE OUR OWN BROADCASTS
+            if (data.sender === this.config.user || data.msgId === this.state.lastMsgId) return;
 
-            // Block local events from triggering a recursive loop
-            this.state.isProcessingRemoteSignal = true;
+            // SET LOCK: Prevent player events from triggering re-broadcast
+            this.state.isRemoteAction = true;
 
             switch(data.type) {
-                case 'LOAD': 
-                    this.load(data.url, data.time); 
+                case 'LOAD':
+                    this.loadMedia(data.url, data.time);
                     break;
-                case 'PLAY': 
-                    if(player) { 
-                        player.currentTime = data.time; 
-                        player.play().catch(() => {});
-                    } 
+                case 'PLAY':
+                    if(player) {
+                        player.currentTime = data.time;
+                        player.play().catch(()=>{});
+                    }
                     break;
-                case 'PAUSE': 
-                    if(player) { 
-                        player.pause(); 
-                        player.currentTime = data.time; 
-                    } 
+                case 'PAUSE':
+                    if(player) {
+                        player.pause();
+                        player.currentTime = data.time;
+                    }
                     break;
-                case 'SEEK': 
-                    if(player) player.currentTime = data.time; 
+                case 'SEEK':
+                    if(player) player.currentTime = data.time;
                     break;
-                case 'QUERY_STATE': 
-                    if(this.state.url) this.manualEmit('STATE_DATA'); 
+                case 'QUERY_STATE':
+                    if(this.state.currentUrl) this.emitSignal('STATE_DATA');
                     break;
-                case 'STATE_DATA': 
-                    if(!this.state.url) this.load(data.url, data.time);
+                case 'STATE_DATA':
+                    if(!this.state.currentUrl) this.loadMedia(data.url, data.time);
+                    break;
+                case 'CHAT':
+                    this.addChat(data.sender, data.text);
                     break;
             }
 
-            // Reset loop-prevention flag after a short delay to allow UI to settle
-            setTimeout(() => { this.state.isProcessingRemoteSignal = false; }, 200);
+            // RELEASE LOCK after short delay
+            setTimeout(() => { this.state.isRemoteAction = false; }, 600);
+        },
+
+        loadMedia(url, startTime = 0) {
+            if(url === this.state.currentUrl && player) return;
+
+            this.state.currentUrl = url;
+            this.state.targetTime = startTime;
+            document.getElementById('active-src').innerText = `UPLINK_SOURCE: ${url}`;
+            document.getElementById('empty-state').style.display = 'none';
+
+            const isYT = url.includes('youtube.com') || url.includes('youtu.be');
+            const isDirect = /\.(mp4|m3u8|webm|ts)$/i.test(url);
+
+            const mountWrap = document.getElementById('player-wrapper');
+            const frame = document.getElementById('web-frame');
+            const shield = document.getElementById('interaction-shield');
+
+            if (isYT || isDirect) {
+                frame.style.display = 'none';
+                mountWrap.style.display = 'block';
+                shield.style.display = 'flex'; // Show unmute button
+                this.initPlayer(url, isYT, startTime);
+            } else {
+                mountWrap.style.display = 'none';
+                shield.style.display = 'none';
+                frame.style.display = 'block';
+                frame.src = url;
+            }
+        },
+
+        initPlayer(url, isYT, startTime) {
+            if (player) player.destroy();
+            if (hls) hls.destroy();
+
+            const mount = document.getElementById('player-mount');
+            if (isYT) {
+                mount.innerHTML = `<div id="plyr-target" data-plyr-provider="youtube" data-plyr-embed-id="${url}"></div>`;
+            } else {
+                mount.innerHTML = `<video id="plyr-target" playsinline controls crossorigin muted></video>`;
+                const video = mount.querySelector('video');
+                if (url.includes('.m3u8') && Hls.isSupported()) {
+                    hls = new Hls(); hls.loadSource(url); hls.attachMedia(video);
+                } else { video.src = url; }
+            }
+
+            player = new Plyr('#plyr-target', { 
+                autoplay: true, 
+                muted: true,
+                keyboard: { focused: true, global: true }
+            });
+
+            player.on('ready', () => {
+                if(startTime > 0) player.currentTime = startTime;
+            });
+
+            // PLAYER INTERACTION LISTENERS (Bidirectional Control)
+            player.on('play', () => {
+                if(!this.state.isRemoteAction) this.emitSignal('PLAY');
+            });
+            player.on('pause', () => {
+                if(!this.state.isRemoteAction) this.emitSignal('PAUSE');
+            });
+            player.on('seeked', () => {
+                if(!this.state.isRemoteAction) this.emitSignal('SEEK');
+            });
         },
 
         sendChat() {
             const input = document.getElementById('chat-input');
-            const msg = input.value.trim();
-            if(!msg) return;
-            this.manualEmit('CHAT', msg);
+            const text = input.value.trim();
+            if(!text) return;
+            this.emitSignal('CHAT', { text });
+            this.addChat(this.config.user, text);
             input.value = '';
         },
 
-        addChat(user, msg) {
+        addChat(user, text) {
             const div = document.createElement('div');
             div.className = 'msg';
             div.innerHTML = `<span class="msg-user">${user}:</span> <span></span>`;
-            div.querySelector('span:last-child').textContent = msg; 
+            div.querySelector('span:last-child').textContent = text;
             const box = document.getElementById('chat-messages');
             box.appendChild(div);
             box.scrollTop = box.scrollHeight;
@@ -400,5 +505,6 @@
         }
     };
 </script>
+
 </body>
 </html>
