@@ -9,6 +9,6 @@ SyncStream is a collaborative video synchronization platform designed for frame-
 - **DevOps:** GitHub Actions CI/CD with secure secret injection.
 
 ## 🚀 Deployment
-1. Add `ABLY_KEY`, `TMDB_KEY`, and `YOUTUBE_KEY` to GitHub Actions Secrets.
+1. Add `ABLY_KEY` to GitHub Actions Secrets.
 2. Push to `main` branch.
 3. Access the live environment via GitHub Pages.
