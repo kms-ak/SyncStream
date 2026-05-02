@@ -19,8 +19,6 @@ jobs:
       - name: Inject Secrets
         run: |
           sed -i "s|%%ABLY_KEY%%|${{ secrets.ABLY_KEY }}|g" index.html
-          sed -i "s|%%TMDB_KEY%%|${{ secrets.TMDB_KEY }}|g" index.html
-          sed -i "s|%%YOUTUBE_KEY%%|${{ secrets.YOUTUBE_KEY }}|g" index.html
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
