@@ -60,7 +60,8 @@
             overflow: hidden;
             position: relative;
             margin-bottom: 15px;
-            display: none;
+            display: block; /* Always block, but children hide/show */
+            min-height: 200px;
             box-shadow: 0 0 40px rgba(0,0,0,0.8);
         }
 
@@ -72,7 +73,7 @@
             inset: 0;
             background: rgba(0,0,0,0.92);
             z-index: 20;
-            display: none;
+            display: flex; /* Shown by default when player loads */
             flex-direction: column;
             align-items: center;
             justify-content: center;
@@ -98,6 +99,16 @@
 
         .sync-controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
         .mode-tag { color: var(--neon); border: 1px solid var(--neon); padding: 2px 6px; border-radius: 3px; font-size: 0.6rem; margin-right: 10px; font-weight: bold; }
+        
+        #empty-state-msg {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #444;
+            font-size: 0.8rem;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
@@ -127,7 +138,9 @@
         </div>
 
         <div id="display-viewport">
-            <div id="interaction-shield" onclick="app.unmute()">
+            <div id="empty-state-msg">WAITING_FOR_SIGNAL...<br><small>Paste a URL or wait for room host.</small></div>
+            
+            <div id="interaction-shield" onclick="app.unmute()" style="display:none;">
                 <div class="btn">ACTIVATE SESSION & AUDIO</div>
                 <p style="margin-top:15px; font-size:0.6rem; color:var(--neon); letter-spacing:1px;">SYNCING_TIMESTAMP...</p>
             </div>
@@ -139,7 +152,7 @@
             <iframe id="web-frame" allow="autoplay; fullscreen; encrypted-media; picture-in-picture"></iframe>
         </div>
 
-        <div class="sync-controls" id="controls" style="display:none;">
+        <div class="sync-controls" id="controls">
             <button class="btn" id="btn-play" onclick="app.emit('PLAY')">PLAY_ALL</button>
             <button class="btn btn-red" id="btn-pause" onclick="app.emit('PAUSE')">PAUSE_ALL</button>
             <button class="btn" onclick="app.emit('SEEK')">SYNC_TIME</button>
@@ -186,10 +199,12 @@
                 document.getElementById('status-box').innerText = `UPLINK_LIVE: ${this.state.room}`;
                 document.getElementById('status-box').style.color = 'var(--neon)';
                 
-                this.state.channel.subscribe('sync', (msg) => this.handleSignal(msg.data));
+                this.state.channel.subscribe('sync', (msg) => {
+                    this.handleSignal(msg.data);
+                });
                 
-                // Ask existing users for the current video state
-                setTimeout(() => this.emit('QUERY_STATE'), 1500);
+                // Request current room status from any active users
+                setTimeout(() => this.emit('QUERY_STATE'), 1000);
             });
         },
 
@@ -209,12 +224,12 @@
         },
 
         load(url, time = 0) {
+            if (!url) return;
             this.state.url = url;
             const isDirect = /\.(mp4|m3u8|webm|ts|ogv|m4v)(\?.*)?$/i.test(url);
             const isYT = url.includes('youtube.com') || url.includes('youtu.be');
             
-            document.getElementById('display-viewport').style.display = 'block';
-            document.getElementById('controls').style.display = 'flex';
+            document.getElementById('empty-state-msg').style.display = 'none';
             const modeTag = document.getElementById('current-mode');
 
             if (isDirect || isYT) {
@@ -233,6 +248,7 @@
                 document.getElementById('web-frame').src = url;
                 document.getElementById('btn-play').style.display = 'none';
                 document.getElementById('btn-pause').style.display = 'none';
+                document.getElementById('interaction-shield').style.display = 'none';
                 if(player) player.destroy();
             }
         },
@@ -262,25 +278,33 @@
 
         emit(type, payload = null) {
             if (!this.state.channel) return;
-            this.state.channel.publish('sync', {
-                type, user: this.state.user,
-                url: payload || this.state.url,
+            const data = {
+                type, 
+                user: this.state.user,
+                url: type === 'LOAD' ? payload : this.state.url,
                 time: player ? player.currentTime : 0
-            });
+            };
+            if(type === 'CHAT') data.msg = payload;
+            
+            this.state.channel.publish('sync', data);
         },
 
         handleSignal(data) {
             if(data.type === 'CHAT') return this.addChat(data.user, data.msg);
+            
+            // Don't process our own signals for these types
+            if(data.user === this.state.user && data.type !== 'QUERY_STATE') return;
+
             switch(data.type) {
                 case 'LOAD': this.load(data.url); break;
                 case 'PLAY': if(player) { player.currentTime = data.time; player.play(); } break;
                 case 'PAUSE': if(player) { player.pause(); player.currentTime = data.time; } break;
                 case 'SEEK': if(player) player.currentTime = data.time; break;
                 case 'QUERY_STATE': 
-                    if(data.user !== this.state.user && this.state.url) this.emit('STATE_DATA'); 
+                    if(this.state.url) this.emit('STATE_DATA'); 
                     break;
                 case 'STATE_DATA': 
-                    if(data.user !== this.state.user && !this.state.url) this.load(data.url, data.time); 
+                    if(!this.state.url) this.load(data.url, data.time); 
                     break;
             }
         },
@@ -289,11 +313,7 @@
             const input = document.getElementById('chat-input');
             const msg = input.value.trim();
             if(!msg) return;
-            if(this.state.channel) {
-                this.state.channel.publish('sync', { type: 'CHAT', user: this.state.user, msg: msg });
-            } else {
-                this.addChat(this.state.user, msg);
-            }
+            this.emit('CHAT', msg);
             input.value = '';
         },
 
@@ -301,7 +321,7 @@
             const div = document.createElement('div');
             div.className = 'msg';
             div.innerHTML = `<span class="msg-user">${user}:</span> <span></span>`;
-            div.querySelector('span:last-child').textContent = msg; // Secure from XSS
+            div.querySelector('span:last-child').textContent = msg; 
             const box = document.getElementById('chat-messages');
             box.appendChild(div);
             box.scrollTop = box.scrollHeight;
