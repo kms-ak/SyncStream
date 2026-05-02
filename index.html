@@ -3,10 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SYNC_STREAM // HYBRID_V5</title>
+    <title>SYNC_STREAM // FIRESTORE_V1</title>
     
-    <!-- Ably for Real-time Messaging -->
-    <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/11.0.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.0.2/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore-compat.js"></script>
     
     <!-- Plyr & HLS.js -->
     <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
@@ -193,10 +195,6 @@
 
         .control-group { display: flex; gap: 15px; }
 
-        /* Plyr Customization */
-        .plyr--full-ui.plyr--video .plyr__control--overlaid { background: var(--neon); color: #000; }
-        .plyr--video .plyr__controls { background: transparent !important; }
-        
         #status-light {
             width: 8px;
             height: 8px;
@@ -204,7 +202,6 @@
             background: var(--error);
             display: inline-block;
             margin-right: 5px;
-            box-shadow: 0 0 5px var(--error);
         }
         #status-light.online {
             background: var(--neon);
@@ -216,242 +213,206 @@
 
 <div id="auth-overlay">
     <div class="auth-card">
-        <h2 style="color:var(--neon); margin-bottom:25px; font-family: 'Syncopate'; font-size: 0.8rem;">ESTABLISH_UPLINK</h2>
+        <h2 style="color:var(--neon); margin-bottom:25px; font-family: 'Syncopate'; font-size: 0.8rem;">ESTABLISH_CLOUD_UPLINK</h2>
         <input type="text" id="user-id" placeholder="USER_NAME">
         <div style="height:12px;"></div>
         <input type="text" id="room-id" placeholder="ROOM_CODE">
         <div style="height:25px;"></div>
         <button class="btn btn-filled" style="width:100%" onclick="app.init()">INITIALIZE</button>
-        <div style="height:10px;"></div>
-        <button class="btn" style="width:100%; font-size: 10px; border-color: #333; color: #666;" onclick="location.reload()">HARD_RESET</button>
+        <p style="font-size: 10px; color: #555; margin-top: 15px;">Using Stealth Firestore Protocol V1</p>
     </div>
 </div>
 
 <header>
-    <div class="logo">SYNC_STREAM // HYBRID_V5</div>
+    <div class="logo">SYNC_STREAM // CLOUD_SYNC</div>
     <div class="header-meta">
         <div style="display: flex; align-items: center;">
             <span id="status-light"></span>
-            <div id="room-display">UPLINK_OFFLINE</div>
+            <div id="room-display">OFFLINE</div>
         </div>
-        <button class="btn" style="border-width:1px;" onclick="app.toggleChat()">CHAT_TOGGLE</button>
+        <button class="btn" style="border-width:1px;" onclick="app.toggleChat()">CHAT</button>
     </div>
 </header>
 
 <div class="app-container">
     <div class="main-stage">
         <div class="input-row">
-            <input type="text" id="media-url" placeholder="Paste URL (YouTube, Brocoflix, MP4) ...">
-            <button class="btn" onclick="app.broadcastLoad()">SIGNAL_PUSH</button>
+            <input type="text" id="media-url" placeholder="Paste URL (YouTube, Brocoflix, Direct MP4) ...">
+            <button class="btn" onclick="app.broadcastLoad()">PUSH_URL</button>
         </div>
 
         <div id="display-viewport">
-            <div id="empty-state">WAITING_FOR_SIGNAL...<br><span style="font-size: 0.6rem; opacity: 0.5;">Paste a URL or wait for room host.</span></div>
+            <div id="empty-state">WAITING_FOR_SIGNAL...</div>
             
             <div id="interaction-shield" onclick="app.unmuteAndSync()">
-                <button class="btn" style="padding: 15px 30px; font-size: 0.8rem;">ACTIVATE SESSION & AUDIO</button>
-                <p id="sync-status-msg" style="color:var(--neon); margin-top:15px; font-family:'Fira Code'; font-size:0.65rem;">SYNCING_TIMESTAMP...</p>
+                <button class="btn" style="padding: 15px 30px; font-size: 0.8rem;">ACTIVATE AUDIO & SYNC</button>
             </div>
             
             <div id="player-wrapper">
                 <div id="player-mount"></div>
             </div>
-
             <iframe id="web-frame" allow="autoplay; fullscreen; encrypted-media;"></iframe>
         </div>
 
         <div class="footer-controls">
             <div class="control-group">
-                <button class="btn" onclick="app.emitSignal('PLAY')">PLAY_ALL</button>
-                <button class="btn btn-red" onclick="app.emitSignal('PAUSE')">PAUSE_ALL</button>
-                <button class="btn" onclick="app.emitSignal('SEEK')">SYNC_TIME</button>
+                <button class="btn" onclick="app.updateState({ playing: true })">PLAY</button>
+                <button class="btn btn-red" onclick="app.updateState({ playing: false })">PAUSE</button>
+                <button class="btn" onclick="app.updateState({ time: player ? player.currentTime : 0 })">SYNC_NOW</button>
             </div>
-            <div class="control-group">
-                <div id="media-sync-indicator" class="btn" style="border:none; opacity:0.6; cursor:default;">MEDIA_SYNC</div>
-            </div>
+            <div id="latency-tag" style="font-size: 10px; color: #444; font-family: 'Fira Code';">LATENCY: 0MS</div>
         </div>
     </div>
 
     <div class="sidebar" id="sidebar">
         <div id="chat-messages"></div>
         <div class="chat-input-row">
-            <input type="text" id="chat-input" placeholder="Transmission ..." onkeydown="if(event.key==='Enter')app.sendChat()">
+            <input type="text" id="chat-input" placeholder="Message..." onkeydown="if(event.key==='Enter')app.sendChat()">
             <button class="btn" onclick="app.sendChat()">SEND</button>
         </div>
     </div>
 </div>
 
 <script>
-    // Critical: Forcing Comet (Long Polling) fallback because WebSockets are being blocked
-    const ABLY_KEY = 'j0IuLw.2D-5qA:I-0n9Rz0h6L7O5e0';
+    const firebaseConfig = JSON.parse(__firebase_config);
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'sync-stream-default';
+    
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+
     let player = null;
     let hls = null;
 
     const app = {
-        config: { user: '', room: '', channel: null, realtime: null },
+        config: { user: '', room: '', uid: '' },
         state: {
             currentUrl: '',
-            isRemoteAction: false, 
-            targetTime: 0,
             isPlaying: false,
-            syncThreshold: 1.5 
+            lastTime: 0,
+            lastUpdate: 0,
+            isLocalAction: false
         },
 
-        init() {
+        async init() {
             const u = document.getElementById('user-id').value.trim();
             const r = document.getElementById('room-id').value.trim().toUpperCase();
             if(!u || !r) return;
+            
             this.config.user = u;
             this.config.room = r;
             document.getElementById('auth-overlay').style.display = 'none';
-            this.connect();
-        },
 
-        connect() {
             try {
-                // If there's an existing connection, close it
-                if(this.config.realtime) this.config.realtime.close();
-
-                this.addSystemMsg("Initiating secure uplink...");
-
-                // Configuration updated to favor compatibility over performance
-                this.config.realtime = new Ably.Realtime({ 
-                    key: ABLY_KEY, 
-                    clientId: this.config.user,
-                    transportPrefs: ['xhr_polling', 'xhr_streaming'], // Avoid WebSockets if blocked
-                    useBinaryProtocol: false, // More compatible with firewalls
-                    tls: true,
-                    autoConnect: true,
-                    recover: true
-                });
-                
-                this.config.realtime.connection.on('connected', () => {
-                    this.config.channel = this.config.realtime.channels.get(`sync_v5_${this.config.room}`);
-                    
-                    const statusLight = document.getElementById('status-light');
-                    statusLight.classList.add('online');
-                    document.getElementById('room-display').innerText = `UPLINK_LIVE: ${this.config.room}`;
-                    this.addSystemMsg("Uplink established successfully.");
-
-                    this.config.channel.subscribe('signal', (msg) => this.handleIncomingSignal(msg.data));
-                    
-                    this.config.channel.presence.subscribe('enter', (m) => {
-                        this.addSystemMsg(`${m.clientId} joined.`);
-                        if(m.clientId !== this.config.user && this.state.currentUrl) {
-                            this.emitSignal('STATE_SYNC', { url: this.state.currentUrl, playing: this.state.isPlaying });
-                        }
-                    });
-                    
-                    this.config.channel.presence.enter();
-                    this.emitSignal('QUERY_STATE');
-                });
-
-                this.config.realtime.connection.on('failed', (err) => {
-                    this.addSystemMsg(`FATAL ERROR: ${err?.message || 'Handshake failed'}`);
-                    document.getElementById('status-light').classList.remove('online');
-                    document.getElementById('room-display').innerText = "LINK_FAILURE";
-                });
-
-                this.config.realtime.connection.on('disconnected', () => {
-                    document.getElementById('status-light').classList.remove('online');
-                    document.getElementById('room-display').innerText = `RECONNECTING...`;
-                });
-
+                // RULE 3: Auth first
+                const cred = await auth.signInAnonymously();
+                this.config.uid = cred.user.uid;
+                this.startSession();
             } catch (e) {
-                console.error("Critical Ably Error:", e);
-                this.addSystemMsg("Connection initialization failed.");
+                this.addSystemMsg("Auth Error: " + e.message);
             }
         },
 
-        toggleChat() {
-            const sb = document.getElementById('sidebar');
-            sb.style.display = sb.style.display === 'none' ? 'flex' : 'none';
+        startSession() {
+            const statusLight = document.getElementById('status-light');
+            statusLight.classList.add('online');
+            document.getElementById('room-display').innerText = `ROOM: ${this.config.room}`;
+            this.addSystemMsg(`Connected as ${this.config.user}`);
+
+            // RULE 1: Use specific path structure
+            this.roomRef = db.doc(`artifacts/${appId}/public/data/rooms/${this.config.room}`);
+            this.chatRef = db.collection(`artifacts/${appId}/public/data/rooms/${this.config.room}/chat`);
+
+            // Listen for room state changes
+            this.roomRef.onSnapshot((doc) => {
+                if (doc.exists) {
+                    this.handleRoomUpdate(doc.data());
+                }
+            }, (err) => this.addSystemMsg("Sync Error: " + err.message));
+
+            // Listen for chat
+            this.chatRef.limit(20).onSnapshot((snap) => {
+                snap.docChanges().forEach(change => {
+                    if (change.type === "added") {
+                        const data = change.doc.data();
+                        if (data.sender !== this.config.user) {
+                            this.addChat(data.sender, data.text);
+                        }
+                    }
+                });
+            }, (err) => console.error(err));
+
+            // Heartbeat loop to keep track of current video time
+            setInterval(() => this.heartbeat(), 2000);
         },
 
-        unmuteAndSync() {
-            document.getElementById('interaction-shield').style.display = 'none';
+        handleRoomUpdate(data) {
+            if (data.lastSender === this.config.user) return;
+
+            // Load new URL if changed
+            if (data.url && data.url !== this.state.currentUrl) {
+                this.loadMedia(data.url, data.time || 0);
+            }
+
+            // Sync playback and time
             if (player) {
-                player.muted = false;
-                player.volume = 1;
-                if(this.state.targetTime > 0) {
-                    player.currentTime = this.state.targetTime;
+                this.state.isLocalAction = true;
+                
+                // Calculate expected time based on server timestamp to account for latency
+                const now = Date.now();
+                const latency = data.serverTime ? (now - data.serverTime) / 1000 : 0;
+                const expectedTime = data.playing ? data.time + latency : data.time;
+                
+                document.getElementById('latency-tag').innerText = `LATENCY: ${Math.round(latency * 1000)}MS`;
+
+                const diff = Math.abs(player.currentTime - expectedTime);
+                if (diff > 2.0) {
+                    player.currentTime = expectedTime;
                 }
-                player.play();
+
+                if (data.playing) player.play(); else player.pause();
+                
+                setTimeout(() => { this.state.isLocalAction = false; }, 500);
+            }
+        },
+
+        async updateState(updates) {
+            if (this.state.isLocalAction || !this.roomRef) return;
+
+            const newState = {
+                url: updates.url || this.state.currentUrl,
+                time: updates.time !== undefined ? updates.time : (player ? player.currentTime : 0),
+                playing: updates.playing !== undefined ? updates.playing : this.state.isPlaying,
+                lastSender: this.config.user,
+                serverTime: Date.now()
+            };
+
+            try {
+                await this.roomRef.set(newState, { merge: true });
+            } catch (e) {
+                console.error("Update failed", e);
+            }
+        },
+
+        heartbeat() {
+            // Only the "active" player updates the time periodically if playing
+            if (player && this.state.isPlaying && !this.state.isLocalAction) {
+                // Optional: periodic sync of time to the DB for late joiners
+                // This version prefers explicit events (PLAY/PAUSE/PUSH) to save bandwidth
             }
         },
 
         broadcastLoad() {
             const url = document.getElementById('media-url').value.trim();
-            if(!url) return;
-            this.emitSignal('LOAD', { url, time: 0 });
-            this.loadMedia(url, 0); 
+            if (!url) return;
+            this.updateState({ url, time: 0, playing: true });
+            this.loadMedia(url, 0);
         },
 
-        emitSignal(type, data = {}) {
-            if(!this.config.channel) {
-                console.warn("Signal dropped: No channel.");
-                return;
-            }
-            const payload = { 
-                type, 
-                sender: this.config.user, 
-                time: player ? player.currentTime : 0,
-                ...data 
-            };
-            this.config.channel.publish('signal', payload);
-        },
-
-        handleIncomingSignal(data) {
-            if (data.sender === this.config.user) return;
-            this.state.isRemoteAction = true;
-
-            switch(data.type) {
-                case 'LOAD':
-                    this.loadMedia(data.url, data.time);
-                    break;
-                case 'PLAY':
-                    if(player) {
-                        const diff = Math.abs(player.currentTime - data.time);
-                        if(diff > this.state.syncThreshold) player.currentTime = data.time;
-                        player.play();
-                    }
-                    break;
-                case 'PAUSE':
-                    if(player) { 
-                        player.pause(); 
-                        player.currentTime = data.time; 
-                    }
-                    break;
-                case 'SEEK':
-                    if(player) player.currentTime = data.time;
-                    break;
-                case 'QUERY_STATE':
-                    if(this.state.currentUrl) {
-                        this.emitSignal('STATE_SYNC', { url: this.state.currentUrl, playing: this.state.isPlaying });
-                    }
-                    break;
-                case 'STATE_SYNC':
-                    if(!this.state.currentUrl || this.state.currentUrl !== data.url) {
-                        this.loadMedia(data.url, data.time);
-                    } else {
-                        const diff = Math.abs(player.currentTime - data.time);
-                        if(diff > this.state.syncThreshold) player.currentTime = data.time;
-                        if(data.playing) player.play(); else player.pause();
-                    }
-                    break;
-                case 'CHAT':
-                    this.addChat(data.sender, data.text);
-                    break;
-            }
-
-            setTimeout(() => { this.state.isRemoteAction = false; }, 800);
-        },
-
-        loadMedia(url, startTime = 0) {
+        loadMedia(url, startTime) {
             this.state.currentUrl = url;
-            this.state.targetTime = startTime;
             document.getElementById('empty-state').style.display = 'none';
-
             const isYT = url.includes('youtube.com') || url.includes('youtu.be');
             const isDirect = /\.(mp4|m3u8|webm|ts|mkv|mov)$/i.test(url) || url.includes('brocoflix');
 
@@ -462,7 +423,6 @@
                 this.initPlayer(url, isYT, startTime);
             } else {
                 document.getElementById('player-wrapper').style.display = 'none';
-                document.getElementById('interaction-shield').style.display = 'none';
                 document.getElementById('web-frame').style.display = 'block';
                 document.getElementById('web-frame').src = url;
             }
@@ -470,61 +430,51 @@
 
         initPlayer(url, isYT, startTime) {
             if (player) player.destroy();
-            if (hls) hls.destroy();
-
             const mount = document.getElementById('player-mount');
+            
             if (isYT) {
                 mount.innerHTML = `<div id="plyr-target" data-plyr-provider="youtube" data-plyr-embed-id="${url}"></div>`;
             } else {
                 mount.innerHTML = `<video id="plyr-target" playsinline controls crossorigin muted></video>`;
                 const video = mount.querySelector('video');
-                
                 if ((url.includes('.m3u8') || url.includes('brocoflix')) && Hls.isSupported()) {
-                    hls = new Hls();
-                    hls.loadSource(url);
-                    hls.attachMedia(video);
+                    hls = new Hls(); hls.loadSource(url); hls.attachMedia(video);
                 } else {
                     video.src = url;
                 }
             }
 
-            player = new Plyr('#plyr-target', { 
-                autoplay: true, 
-                muted: true,
-                youtube: { noCookie: true, rel: 0, showinfo: 0, iv_load_policy: 3, modestbranding: 1 }
-            });
+            player = new Plyr('#plyr-target', { autoplay: true, muted: true });
 
-            player.on('ready', () => { 
-                if(startTime > 0) player.currentTime = startTime;
-                player.play();
-            });
-
+            player.on('ready', () => { if(startTime > 0) player.currentTime = startTime; player.play(); });
             player.on('play', () => { 
                 this.state.isPlaying = true;
-                if(!this.state.isRemoteAction) this.emitSignal('PLAY'); 
+                if(!this.state.isLocalAction) this.updateState({ playing: true }); 
             });
             player.on('pause', () => { 
                 this.state.isPlaying = false;
-                if(!this.state.isRemoteAction) this.emitSignal('PAUSE'); 
+                if(!this.state.isLocalAction) this.updateState({ playing: false }); 
             });
-            player.on('seeked', () => { 
-                if(!this.state.isRemoteAction) this.emitSignal('SEEK'); 
-            });
+        },
+
+        unmuteAndSync() {
+            document.getElementById('interaction-shield').style.display = 'none';
+            if (player) { player.muted = false; player.volume = 1; player.play(); }
         },
 
         sendChat() {
             const input = document.getElementById('chat-input');
-            const val = input.value.trim();
-            if(!val) return;
-            this.emitSignal('CHAT', { text: val });
-            this.addChat(this.config.user, val);
+            const text = input.value.trim();
+            if(!text || !this.chatRef) return;
+            this.chatRef.add({ sender: this.config.user, text, timestamp: Date.now() });
+            this.addChat(this.config.user, text);
             input.value = '';
         },
 
         addChat(user, text) {
             const div = document.createElement('div');
             div.className = 'msg';
-            div.innerHTML = `<span class="msg-user">> ${user}:</span> <span style="color:#eee; font-style: normal;"></span>`;
+            div.innerHTML = `<span class="msg-user">${user}:</span> <span></span>`;
             div.querySelector('span:last-child').textContent = text;
             const container = document.getElementById('chat-messages');
             container.appendChild(div);
@@ -534,9 +484,14 @@
         addSystemMsg(text) {
             const div = document.createElement('div');
             div.className = 'msg';
+            div.style.color = 'var(--neon)';
             div.textContent = `> ${text}`;
             document.getElementById('chat-messages').appendChild(div);
-            console.log("SYS:", text);
+        },
+
+        toggleChat() {
+            const sb = document.getElementById('sidebar');
+            sb.style.display = sb.style.display === 'none' ? 'flex' : 'none';
         }
     };
 </script>
