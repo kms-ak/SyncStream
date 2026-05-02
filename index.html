@@ -5,10 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SYNC_STREAM // YOUTUBE_EDITION</title>
     
-    <!-- Firebase SDKs -->
-    <script src="https://www.gstatic.com/firebasejs/11.0.2/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/11.0.2/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore-compat.js"></script>
+    <!-- Ably -->
+    <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
     
     <!-- Plyr -->
     <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
@@ -222,13 +220,13 @@
 
 <div id="auth-overlay">
     <div class="auth-card">
-        <h2 style="color:var(--neon); margin-bottom:25px; font-family: 'Syncopate'; font-size: 0.8rem;">YOUTUBE_SYNC_INIT</h2>
+        <h2 style="color:var(--neon); margin-bottom:25px; font-family: 'Syncopate'; font-size: 0.8rem;">SYNC_STREAM_INIT</h2>
         <input type="text" id="user-id" placeholder="USERNAME">
         <div style="height:12px;"></div>
         <input type="text" id="room-id" placeholder="ROOM_CODE">
         <div style="height:25px;"></div>
         <button id="init-btn" class="btn btn-filled" style="width:100%">JOIN_STREAM</button>
-        <div id="auth-debug">Ready for deployment...</div>
+        <div id="auth-debug">Ready...</div>
     </div>
 </div>
 
@@ -283,154 +281,122 @@
 
 <script>
     let player = null;
+    const ABLY_KEY = '%%ABLY_KEY%%';
 
     const app = {
-        config: { user: '', room: '', uid: '' },
-        state: {
-            currentUrl: '',
-            isPlaying: false,
-            isLocalAction: false
-        },
-        db: null,
-        auth: null,
+        config: { user: '', room: '' },
+        state: { currentUrl: '', isPlaying: false, isLocalAction: false },
+        ably: null,
+        channel: null,
 
         logDebug(msg) {
-            const debugEl = document.getElementById('auth-debug');
-            if (debugEl) {
-                const time = new Date().toLocaleTimeString().split(' ')[0];
-                debugEl.innerHTML += `<div>[${time}] ${msg}</div>`;
-                debugEl.scrollTop = debugEl.scrollHeight;
+            const el = document.getElementById('auth-debug');
+            if (el) {
+                el.innerHTML += `<div>${msg}</div>`;
+                el.scrollTop = el.scrollHeight;
             }
-        },
-
-        async awaitConfig(retries = 20) {
-            this.logDebug(`Uplink attempt: ${21 - retries}/20`);
-            if (typeof __firebase_config !== 'undefined') return true;
-            if (retries <= 0) return false;
-            await new Promise(r => setTimeout(r, 1000));
-            return this.awaitConfig(retries - 1);
         },
 
         async init() {
             const u = document.getElementById('user-id').value.trim();
             const r = document.getElementById('room-id').value.trim().toUpperCase();
-            if(!u || !r) return;
+            
+            if(!u || !r) {
+                this.logDebug('Fill all fields');
+                return;
+            }
 
             this.config.user = u;
             this.config.room = r;
 
             try {
-                this.logDebug("Checking SDK status...");
-                const hasConfig = await this.awaitConfig();
-                if (!hasConfig) throw new Error("Config not found. Please refresh page.");
-
-                const firebaseConfig = JSON.parse(__firebase_config);
-                if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+                this.logDebug('Connecting to Ably...');
                 
-                this.db = firebase.firestore();
-                this.auth = firebase.auth();
-
-                this.logDebug("Authenticating node...");
-                let cred;
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    cred = await this.auth.signInWithCustomToken(__initial_auth_token);
-                } else {
-                    cred = await this.auth.signInAnonymously();
-                }
+                this.ably = new Ably.Realtime({ key: ABLY_KEY, clientId: u });
                 
-                this.config.uid = cred.user.uid;
-                this.logDebug("Authentication confirmed.");
+                await new Promise((res, rej) => {
+                    this.ably.connection.once('connected', res);
+                    this.ably.connection.once('failed', () => rej(new Error('Connection failed')));
+                });
                 
+                this.logDebug('Connected!');
                 document.getElementById('auth-overlay').style.display = 'none';
                 this.startSession();
             } catch (e) {
-                this.logDebug(`FATAL: ${e.message}`);
+                this.logDebug(`Error: ${e.message}`);
             }
         },
 
         startSession() {
-            const appId = typeof __app_id !== 'undefined' ? __app_id : 'yt-sync-default';
             document.getElementById('status-light').classList.add('online');
             document.getElementById('room-display').innerText = `ROOM: ${this.config.room}`;
-            this.addSystemMsg(`SYNC_ACTIVE // USER: ${this.config.user}`);
-
-            this.roomRef = this.db.doc(`artifacts/${appId}/public/data/rooms/${this.config.room}`);
-            this.chatRef = this.db.collection(`artifacts/${appId}/public/data/rooms/${this.config.room}/chat`);
-
-            // Listen for room state changes
-            this.roomRef.onSnapshot((doc) => {
-                if (doc.exists) this.handleRoomUpdate(doc.data());
-            }, (err) => console.error("Firestore Listen Error:", err));
-
-            // Listen for chat
-            this.chatRef.onSnapshot((snap) => {
-                snap.docChanges().forEach(change => {
-                    if (change.type === "added") {
-                        const data = change.doc.data();
-                        if (data.sender !== this.config.user) {
-                            this.addChat(data.sender, data.text);
-                        }
-                    }
-                });
-            }, (err) => console.error("Chat Listen Error:", err));
+            
+            this.channel = this.ably.channels.get(this.config.room);
+            
+            this.channel.subscribe('sync', (msg) => {
+                if (msg.clientId === this.config.user) return;
+                this.handleSync(msg.data);
+            });
+            
+            this.channel.subscribe('chat', (msg) => {
+                if (msg.clientId !== this.config.user) {
+                    this.addChat(msg.clientId, msg.data.text);
+                }
+            });
+            
+            this.addSystemMsg(`Connected as ${this.config.user}`);
         },
 
-        handleRoomUpdate(data) {
-            // Ignore updates we sent ourselves
-            if (data.lastSender === this.config.user) return;
-            
-            // If URL changed, load the new video
+        handleSync(data) {
             if (data.url && data.url !== this.state.currentUrl) {
-                this.loadYouTube(data.url, data.time || 0);
+                this.loadMedia(data.url, data.time || 0);
             }
             
-            // Sync player playback
             if (player) {
                 this.state.isLocalAction = true;
                 
-                const now = Date.now();
-                const latency = data.serverTime ? (now - data.serverTime) / 1000 : 0;
-                const expectedTime = data.playing ? (data.time + latency) : data.time;
+                const diff = Math.abs(player.currentTime - data.time);
+                if (diff > 1.5) player.currentTime = data.time;
                 
-                document.getElementById('latency-tag').innerText = `SYNC_OFFSET: ${Math.round(latency * 1000)}MS`;
+                if (data.playing) player.play().catch(() => {});
+                else player.pause();
                 
-                const diff = Math.abs(player.currentTime - expectedTime);
-                if (diff > 1.5) {
-                    player.currentTime = expectedTime;
-                }
-                
-                if (data.playing) player.play(); else player.pause();
-                
-                setTimeout(() => { this.state.isLocalAction = false; }, 800);
+                setTimeout(() => { this.state.isLocalAction = false; }, 500);
             }
         },
 
-        async updateState(updates) {
-            if (this.state.isLocalAction || !this.roomRef) return;
+        publishSync(updates) {
+            if (this.state.isLocalAction || !this.channel) return;
             
-            const newState = {
+            const data = {
                 url: updates.url || this.state.currentUrl,
                 time: updates.time !== undefined ? updates.time : (player ? player.currentTime : 0),
-                playing: updates.playing !== undefined ? updates.playing : this.state.isPlaying,
-                lastSender: this.config.user,
-                serverTime: Date.now()
+                playing: updates.playing !== undefined ? updates.playing : this.state.isPlaying
             };
             
-            try { 
-                await this.roomRef.set(newState, { merge: true }); 
-            } catch (e) { 
-                console.warn("State update failed", e); 
-            }
+            this.channel.publish('sync', data);
         },
 
         broadcastLoad() {
             const url = document.getElementById('media-url').value.trim();
             if (!url) return;
-            this.updateState({ url, time: 0, playing: true });
-            this.loadYouTube(url, 0);
+            this.publishSync({ url, time: 0, playing: true });
+            this.loadMedia(url, 0);
         },
 
-        loadYouTube(url, startTime) {
+        detectProvider(url) {
+            if (url.includes('youtube.com') || url.includes('youtu.be')) {
+                const id = url.match(/(?:v=|youtu\.be\/)([^&?]+)/);
+                return { type: 'youtube', id: id ? id[1] : url };
+            }
+            if (url.includes('vimeo.com')) {
+                const id = url.match(/vimeo\.com\/(\d+)/);
+                return { type: 'vimeo', id: id ? id[1] : url };
+            }
+            return { type: 'video', id: url };
+        },
+
+        loadMedia(url, startTime) {
             this.state.currentUrl = url;
             document.getElementById('empty-state').style.display = 'none';
             document.getElementById('interaction-shield').style.display = 'flex';
@@ -438,31 +404,43 @@
             const mount = document.getElementById('player-mount');
             if (player) { try { player.destroy(); } catch(e) {} }
 
-            mount.innerHTML = `<div id="yt-player" data-plyr-provider="youtube" data-plyr-embed-id="${url}"></div>`;
+            const provider = this.detectProvider(url);
+            let html = '';
 
-            player = new Plyr('#yt-player', { 
+            if (provider.type === 'youtube') {
+                html = `<div id="player" data-plyr-provider="youtube" data-plyr-embed-id="${provider.id}"></div>`;
+            } else if (provider.type === 'vimeo') {
+                html = `<div id="player" data-plyr-provider="vimeo" data-plyr-embed-id="${provider.id}"></div>`;
+            } else {
+                html = `<video id="player" playsinline controls>
+                    <source src="${url}" type="video/mp4">
+                </video>`;
+            }
+
+            mount.innerHTML = html;
+
+            player = new Plyr('#player', { 
                 autoplay: true, 
-                muted: true,
-                youtube: { noCookie: true, rel: 0, showinfo: 0, iv_load_policy: 3 }
+                muted: true 
             });
 
             player.on('ready', () => { 
                 if(startTime > 0) player.currentTime = startTime; 
-                player.play(); 
+                player.play().catch(() => {}); 
             });
 
             player.on('play', () => { 
                 this.state.isPlaying = true;
-                if(!this.state.isLocalAction) this.updateState({ playing: true }); 
+                if(!this.state.isLocalAction) this.publishSync({ playing: true }); 
             });
 
             player.on('pause', () => { 
                 this.state.isPlaying = false;
-                if(!this.state.isLocalAction) this.updateState({ playing: false }); 
+                if(!this.state.isLocalAction) this.publishSync({ playing: false }); 
             });
 
             player.on('seeked', () => {
-                if(!this.state.isLocalAction) this.updateState({ time: player.currentTime });
+                if(!this.state.isLocalAction) this.publishSync({ time: player.currentTime });
             });
         },
 
@@ -471,21 +449,16 @@
             if (player) { 
                 player.muted = false; 
                 player.volume = 1; 
-                player.play(); 
+                player.play().catch(() => {}); 
             }
         },
 
         sendChat() {
             const input = document.getElementById('chat-input');
             const text = input.value.trim();
-            if(!text || !this.chatRef) return;
+            if(!text || !this.channel) return;
             
-            this.chatRef.add({ 
-                sender: this.config.user, 
-                text, 
-                timestamp: Date.now() 
-            });
-            
+            this.channel.publish('chat', { text });
             this.addChat(this.config.user, text);
             input.value = '';
         },
@@ -510,7 +483,7 @@
         },
 
         toggleChat() {
-            const sb = document.getElementById('sidebar');
+            const sb = document.querySelector('.sidebar');
             sb.style.display = (sb.style.display === 'none') ? 'flex' : 'none';
         }
     };
