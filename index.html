@@ -59,6 +59,19 @@
             text-align: center; 
             border-radius: 4px; 
         }
+
+        #auth-debug {
+            margin-top: 15px;
+            font-family: 'Fira Code', monospace;
+            font-size: 10px;
+            color: #555;
+            text-align: left;
+            background: #000;
+            padding: 10px;
+            border: 1px solid #111;
+            max-height: 120px;
+            overflow-y: auto;
+        }
         
         /* --- HEADER --- */
         header { 
@@ -218,8 +231,8 @@
         <div style="height:12px;"></div>
         <input type="text" id="room-id" placeholder="ROOM_CODE">
         <div style="height:25px;"></div>
-        <button class="btn btn-filled" style="width:100%" onclick="app.init()">INITIALIZE</button>
-        <p style="font-size: 10px; color: #555; margin-top: 15px;">Using Stealth Firestore Protocol V1</p>
+        <button id="init-btn" class="btn btn-filled" style="width:100%" onclick="app.init()">INITIALIZE</button>
+        <div id="auth-debug">System ready...</div>
     </div>
 </div>
 
@@ -274,65 +287,83 @@
 </div>
 
 <script>
-    const firebaseConfig = JSON.parse(__firebase_config);
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'sync-stream-default';
-    
-    // Initialize Firebase
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.firestore();
-    const auth = firebase.auth();
-
-    let player = null;
-    let hls = null;
-
+    // Safe initialization logic
     const app = {
         config: { user: '', room: '', uid: '' },
         state: {
             currentUrl: '',
             isPlaying: false,
-            lastTime: 0,
-            lastUpdate: 0,
             isLocalAction: false
+        },
+        db: null,
+        auth: null,
+
+        logDebug(msg) {
+            const debugEl = document.getElementById('auth-debug');
+            if (debugEl) {
+                const time = new Date().toLocaleTimeString().split(' ')[0];
+                debugEl.innerHTML += `<div>[${time}] ${msg}</div>`;
+                debugEl.scrollTop = debugEl.scrollHeight;
+            }
+            console.log(`[DEBUG] ${msg}`);
         },
 
         async init() {
+            this.logDebug("Init button clicked.");
+            
             const u = document.getElementById('user-id').value.trim();
             const r = document.getElementById('room-id').value.trim().toUpperCase();
-            if(!u || !r) return;
             
+            if(!u || !r) {
+                this.logDebug("Error: Name and Room are required.");
+                return;
+            }
+
             this.config.user = u;
             this.config.room = r;
-            document.getElementById('auth-overlay').style.display = 'none';
 
             try {
-                // RULE 3: Auth first
-                const cred = await auth.signInAnonymously();
+                this.logDebug("Checking Firebase SDK...");
+                if (typeof firebase === 'undefined') {
+                    throw new Error("Firebase SDK failed to load. Check your internet or firewall.");
+                }
+
+                if (!this.db) {
+                    this.logDebug("Configuring client...");
+                    const firebaseConfig = JSON.parse(__firebase_config);
+                    firebase.initializeApp(firebaseConfig);
+                    this.db = firebase.firestore();
+                    this.auth = firebase.auth();
+                }
+
+                this.logDebug("Attempting Uplink...");
+                const cred = await this.auth.signInAnonymously();
                 this.config.uid = cred.user.uid;
+                
+                this.logDebug("Success. Entering Room...");
+                document.getElementById('auth-overlay').style.display = 'none';
                 this.startSession();
             } catch (e) {
-                this.addSystemMsg("Auth Error: " + e.message);
+                this.logDebug(`FAILED: ${e.message}`);
+                console.error(e);
             }
         },
 
         startSession() {
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'sync-stream-default';
             const statusLight = document.getElementById('status-light');
             statusLight.classList.add('online');
             document.getElementById('room-display').innerText = `ROOM: ${this.config.room}`;
             this.addSystemMsg(`Connected as ${this.config.user}`);
 
-            // RULE 1: Use specific path structure
-            this.roomRef = db.doc(`artifacts/${appId}/public/data/rooms/${this.config.room}`);
-            this.chatRef = db.collection(`artifacts/${appId}/public/data/rooms/${this.config.room}/chat`);
+            this.roomRef = this.db.doc(`artifacts/${appId}/public/data/rooms/${this.config.room}`);
+            this.chatRef = this.db.collection(`artifacts/${appId}/public/data/rooms/${this.config.room}/chat`);
 
-            // Listen for room state changes
             this.roomRef.onSnapshot((doc) => {
-                if (doc.exists) {
-                    this.handleRoomUpdate(doc.data());
-                }
+                if (doc.exists) this.handleRoomUpdate(doc.data());
             }, (err) => this.addSystemMsg("Sync Error: " + err.message));
 
-            // Listen for chat
-            this.chatRef.limit(20).onSnapshot((snap) => {
+            this.chatRef.orderBy('timestamp', 'desc').limit(20).onSnapshot((snap) => {
                 snap.docChanges().forEach(change => {
                     if (change.type === "added") {
                         const data = change.doc.data();
@@ -342,44 +373,28 @@
                     }
                 });
             }, (err) => console.error(err));
-
-            // Heartbeat loop to keep track of current video time
-            setInterval(() => this.heartbeat(), 2000);
         },
 
         handleRoomUpdate(data) {
             if (data.lastSender === this.config.user) return;
-
-            // Load new URL if changed
             if (data.url && data.url !== this.state.currentUrl) {
                 this.loadMedia(data.url, data.time || 0);
             }
-
-            // Sync playback and time
             if (player) {
                 this.state.isLocalAction = true;
-                
-                // Calculate expected time based on server timestamp to account for latency
                 const now = Date.now();
                 const latency = data.serverTime ? (now - data.serverTime) / 1000 : 0;
                 const expectedTime = data.playing ? data.time + latency : data.time;
-                
                 document.getElementById('latency-tag').innerText = `LATENCY: ${Math.round(latency * 1000)}MS`;
-
                 const diff = Math.abs(player.currentTime - expectedTime);
-                if (diff > 2.0) {
-                    player.currentTime = expectedTime;
-                }
-
+                if (diff > 2.0) player.currentTime = expectedTime;
                 if (data.playing) player.play(); else player.pause();
-                
                 setTimeout(() => { this.state.isLocalAction = false; }, 500);
             }
         },
 
         async updateState(updates) {
             if (this.state.isLocalAction || !this.roomRef) return;
-
             const newState = {
                 url: updates.url || this.state.currentUrl,
                 time: updates.time !== undefined ? updates.time : (player ? player.currentTime : 0),
@@ -387,20 +402,7 @@
                 lastSender: this.config.user,
                 serverTime: Date.now()
             };
-
-            try {
-                await this.roomRef.set(newState, { merge: true });
-            } catch (e) {
-                console.error("Update failed", e);
-            }
-        },
-
-        heartbeat() {
-            // Only the "active" player updates the time periodically if playing
-            if (player && this.state.isPlaying && !this.state.isLocalAction) {
-                // Optional: periodic sync of time to the DB for late joiners
-                // This version prefers explicit events (PLAY/PAUSE/PUSH) to save bandwidth
-            }
+            try { await this.roomRef.set(newState, { merge: true }); } catch (e) { console.error(e); }
         },
 
         broadcastLoad() {
@@ -415,7 +417,6 @@
             document.getElementById('empty-state').style.display = 'none';
             const isYT = url.includes('youtube.com') || url.includes('youtu.be');
             const isDirect = /\.(mp4|m3u8|webm|ts|mkv|mov)$/i.test(url) || url.includes('brocoflix');
-
             if (isYT || isDirect) {
                 document.getElementById('web-frame').style.display = 'none';
                 document.getElementById('player-wrapper').style.display = 'block';
@@ -431,21 +432,16 @@
         initPlayer(url, isYT, startTime) {
             if (player) player.destroy();
             const mount = document.getElementById('player-mount');
-            
             if (isYT) {
                 mount.innerHTML = `<div id="plyr-target" data-plyr-provider="youtube" data-plyr-embed-id="${url}"></div>`;
             } else {
                 mount.innerHTML = `<video id="plyr-target" playsinline controls crossorigin muted></video>`;
                 const video = mount.querySelector('video');
-                if ((url.includes('.m3u8') || url.includes('brocoflix')) && Hls.isSupported()) {
-                    hls = new Hls(); hls.loadSource(url); hls.attachMedia(video);
-                } else {
-                    video.src = url;
-                }
+                if ((url.includes('.m3u8') || url.includes('brocoflix')) && typeof Hls !== 'undefined' && Hls.isSupported()) {
+                    const hls = new Hls(); hls.loadSource(url); hls.attachMedia(video);
+                } else { video.src = url; }
             }
-
             player = new Plyr('#plyr-target', { autoplay: true, muted: true });
-
             player.on('ready', () => { if(startTime > 0) player.currentTime = startTime; player.play(); });
             player.on('play', () => { 
                 this.state.isPlaying = true;
@@ -494,6 +490,15 @@
             sb.style.display = sb.style.display === 'none' ? 'flex' : 'none';
         }
     };
+
+    // Global listener for the button in case the attribute is stripped
+    window.addEventListener('load', () => {
+        app.logDebug("Page loaded. System standby.");
+        const btn = document.getElementById('init-btn');
+        if (btn) {
+            btn.onclick = () => app.init();
+        }
+    });
 </script>
 
 </body>
