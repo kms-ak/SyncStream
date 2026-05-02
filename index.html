@@ -393,32 +393,45 @@
                 const id = url.match(/vimeo\.com\/(\d+)/);
                 return { type: 'vimeo', id: id ? id[1] : url };
             }
-            return { type: 'video', id: url };
+            if (url.match(/\.(mp4|webm|ogg)$/i)) {
+                return { type: 'video', id: url };
+            }
+            return { type: 'iframe', id: url };
         },
 
         loadMedia(url, startTime) {
             this.state.currentUrl = url;
             document.getElementById('empty-state').style.display = 'none';
-            document.getElementById('interaction-shield').style.display = 'flex';
+            document.getElementById('interaction-shield').style.display = 'none';
             
             const mount = document.getElementById('player-mount');
             if (player) { try { player.destroy(); } catch(e) {} }
+            player = null;
 
             const provider = this.detectProvider(url);
             let html = '';
 
             if (provider.type === 'youtube') {
                 html = `<div id="player" data-plyr-provider="youtube" data-plyr-embed-id="${provider.id}"></div>`;
+                this.setupPlyr(startTime);
             } else if (provider.type === 'vimeo') {
                 html = `<div id="player" data-plyr-provider="vimeo" data-plyr-embed-id="${provider.id}"></div>`;
-            } else {
+                this.setupPlyr(startTime);
+            } else if (provider.type === 'video') {
                 html = `<video id="player" playsinline controls>
                     <source src="${url}" type="video/mp4">
                 </video>`;
+                this.setupPlyr(startTime);
+            } else {
+                // Iframe fallback for streaming sites
+                html = `<iframe src="${url}" style="width:100%;height:100%;border:0;" allowfullscreen allow="autoplay; encrypted-media"></iframe>`;
+                this.addSystemMsg('⚠️ Iframe mode - manual sync required');
             }
 
             mount.innerHTML = html;
+        },
 
+        setupPlyr(startTime) {
             player = new Plyr('#player', { 
                 autoplay: true, 
                 muted: true 
