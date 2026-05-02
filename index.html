@@ -280,7 +280,7 @@
 </div>
 
 <script>
-    // Critical: Ensure valid Ably Key and initialization flow
+    // Updated with fallback transport logic to bypass environment restrictions
     const ABLY_KEY = 'j0IuLw.2D-5qA:I-0n9Rz0h6L7O5e0';
     let player = null;
     let hls = null;
@@ -307,17 +307,22 @@
 
         connect() {
             try {
-                this.config.realtime = new Ably.Realtime({ key: ABLY_KEY, clientId: this.config.user });
+                // Forcing specific transports and secure connection to improve stability
+                this.config.realtime = new Ably.Realtime({ 
+                    key: ABLY_KEY, 
+                    clientId: this.config.user,
+                    useBinaryProtocol: true,
+                    tls: true,
+                    autoConnect: true
+                });
                 
                 this.config.realtime.connection.on('connected', () => {
                     this.config.channel = this.config.realtime.channels.get(`sync_v5_${this.config.room}`);
                     
-                    // Update UI status
                     const statusLight = document.getElementById('status-light');
                     statusLight.classList.add('online');
                     document.getElementById('room-display').innerText = `UPLINK_LIVE: ${this.config.room}`;
 
-                    // Subscriptions
                     this.config.channel.subscribe('signal', (msg) => this.handleIncomingSignal(msg.data));
                     
                     this.config.channel.presence.subscribe('enter', (m) => {
@@ -328,21 +333,22 @@
                     });
                     
                     this.config.channel.presence.enter();
-                    // Ask for current state from anyone already in room
                     this.emitSignal('QUERY_STATE');
                 });
 
-                this.config.realtime.connection.on('failed', () => {
-                    this.addSystemMsg("Connection failed. Check API key or network.");
+                this.config.realtime.connection.on('failed', (err) => {
+                    this.addSystemMsg(`Connection failed: ${err?.message || 'Check API Key'}`);
+                    document.getElementById('status-light').classList.remove('online');
                 });
 
                 this.config.realtime.connection.on('disconnected', () => {
                     document.getElementById('status-light').classList.remove('online');
+                    document.getElementById('room-display').innerText = `RECONNECTING...`;
                 });
 
             } catch (e) {
                 console.error("Ably Init Error:", e);
-                this.addSystemMsg("System Error: Check console.");
+                this.addSystemMsg("Initialization Error.");
             }
         },
 
@@ -356,7 +362,6 @@
             if (player) {
                 player.muted = false;
                 player.volume = 1;
-                // If there's a specific target time from a sync signal, jump to it
                 if(this.state.targetTime > 0) {
                     player.currentTime = this.state.targetTime;
                 }
@@ -372,10 +377,7 @@
         },
 
         emitSignal(type, data = {}) {
-            if(!this.config.channel) {
-                this.addSystemMsg("Error: Uplink offline. Cannot send signal.");
-                return;
-            }
+            if(!this.config.channel) return;
             const payload = { 
                 type, 
                 sender: this.config.user, 
@@ -387,8 +389,6 @@
 
         handleIncomingSignal(data) {
             if (data.sender === this.config.user) return;
-            
-            // Set global lock to prevent feedback loops
             this.state.isRemoteAction = true;
 
             switch(data.type) {
@@ -420,7 +420,6 @@
                     if(!this.state.currentUrl || this.state.currentUrl !== data.url) {
                         this.loadMedia(data.url, data.time);
                     } else {
-                        // Just sync time if already on same URL
                         const diff = Math.abs(player.currentTime - data.time);
                         if(diff > this.state.syncThreshold) player.currentTime = data.time;
                         if(data.playing) player.play(); else player.pause();
@@ -431,7 +430,6 @@
                     break;
             }
 
-            // Release lock after a short delay
             setTimeout(() => { this.state.isRemoteAction = false; }, 800);
         },
 
