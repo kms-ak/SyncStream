@@ -66,6 +66,7 @@
             justify-content: space-between; 
             align-items: center; 
             background: var(--bg);
+            border-bottom: 1px solid var(--border);
         }
         .logo { font-family: 'Syncopate', sans-serif; color: var(--neon); letter-spacing: 2px; font-size: 0.85rem; }
         
@@ -192,9 +193,23 @@
 
         .control-group { display: flex; gap: 15px; }
 
-        /* Plyr Customization to match dark theme */
+        /* Plyr Customization */
         .plyr--full-ui.plyr--video .plyr__control--overlaid { background: var(--neon); color: #000; }
         .plyr--video .plyr__controls { background: transparent !important; }
+        
+        #status-light {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--error);
+            display: inline-block;
+            margin-right: 5px;
+            box-shadow: 0 0 5px var(--error);
+        }
+        #status-light.online {
+            background: var(--neon);
+            box-shadow: 0 0 8px var(--neon);
+        }
     </style>
 </head>
 <body>
@@ -213,7 +228,10 @@
 <header>
     <div class="logo">SYNC_STREAM // HYBRID_V5</div>
     <div class="header-meta">
-        <div id="room-display">UPLINK_OFFLINE</div>
+        <div style="display: flex; align-items: center;">
+            <span id="status-light"></span>
+            <div id="room-display">UPLINK_OFFLINE</div>
+        </div>
         <button class="btn" style="border-width:1px;" onclick="app.toggleChat()">CHAT_TOGGLE</button>
     </div>
 </header>
@@ -262,19 +280,19 @@
 </div>
 
 <script>
+    // Critical: Ensure valid Ably Key and initialization flow
     const ABLY_KEY = 'j0IuLw.2D-5qA:I-0n9Rz0h6L7O5e0';
     let player = null;
     let hls = null;
 
     const app = {
-        config: { user: '', room: '', channel: null },
+        config: { user: '', room: '', channel: null, realtime: null },
         state: {
             currentUrl: '',
             isRemoteAction: false, 
-            lastMsgId: null,
             targetTime: 0,
             isPlaying: false,
-            syncThreshold: 2.0 // Seconds allowed before forcing a seek
+            syncThreshold: 1.5 
         },
 
         init() {
@@ -283,29 +301,49 @@
             if(!u || !r) return;
             this.config.user = u;
             this.config.room = r;
-            document.getElementById('auth-overlay').remove();
+            document.getElementById('auth-overlay').style.display = 'none';
             this.connect();
         },
 
         connect() {
-            const realtime = new Ably.Realtime({ key: ABLY_KEY, clientId: this.config.user });
-            realtime.connection.on('connected', () => {
-                this.config.channel = realtime.channels.get(`sync_v5_${this.config.room}`);
-                document.getElementById('room-display').innerText = `UPLINK_LIVE: ${this.config.room}`;
+            try {
+                this.config.realtime = new Ably.Realtime({ key: ABLY_KEY, clientId: this.config.user });
+                
+                this.config.realtime.connection.on('connected', () => {
+                    this.config.channel = this.config.realtime.channels.get(`sync_v5_${this.config.room}`);
+                    
+                    // Update UI status
+                    const statusLight = document.getElementById('status-light');
+                    statusLight.classList.add('online');
+                    document.getElementById('room-display').innerText = `UPLINK_LIVE: ${this.config.room}`;
 
-                this.config.channel.subscribe('signal', (msg) => this.handleIncomingSignal(msg.data));
-                
-                this.config.channel.presence.subscribe('enter', (m) => {
-                    this.addSystemMsg(`${m.clientId} joined.`);
-                    // If we are already watching something, tell the newcomer
-                    if(m.clientId !== this.config.user && this.state.currentUrl) {
-                        this.emitSignal('STATE_SYNC', { url: this.state.currentUrl, playing: this.state.isPlaying });
-                    }
+                    // Subscriptions
+                    this.config.channel.subscribe('signal', (msg) => this.handleIncomingSignal(msg.data));
+                    
+                    this.config.channel.presence.subscribe('enter', (m) => {
+                        this.addSystemMsg(`${m.clientId} joined.`);
+                        if(m.clientId !== this.config.user && this.state.currentUrl) {
+                            this.emitSignal('STATE_SYNC', { url: this.state.currentUrl, playing: this.state.isPlaying });
+                        }
+                    });
+                    
+                    this.config.channel.presence.enter();
+                    // Ask for current state from anyone already in room
+                    this.emitSignal('QUERY_STATE');
                 });
-                
-                this.config.channel.presence.enter();
-                this.emitSignal('QUERY_STATE');
-            });
+
+                this.config.realtime.connection.on('failed', () => {
+                    this.addSystemMsg("Connection failed. Check API key or network.");
+                });
+
+                this.config.realtime.connection.on('disconnected', () => {
+                    document.getElementById('status-light').classList.remove('online');
+                });
+
+            } catch (e) {
+                console.error("Ably Init Error:", e);
+                this.addSystemMsg("System Error: Check console.");
+            }
         },
 
         toggleChat() {
@@ -318,7 +356,10 @@
             if (player) {
                 player.muted = false;
                 player.volume = 1;
-                if(this.state.targetTime > 0) player.currentTime = this.state.targetTime;
+                // If there's a specific target time from a sync signal, jump to it
+                if(this.state.targetTime > 0) {
+                    player.currentTime = this.state.targetTime;
+                }
                 player.play();
             }
         },
@@ -326,17 +367,17 @@
         broadcastLoad() {
             const url = document.getElementById('media-url').value.trim();
             if(!url) return;
-            this.emitSignal('LOAD', { url });
+            this.emitSignal('LOAD', { url, time: 0 });
             this.loadMedia(url, 0); 
         },
 
         emitSignal(type, data = {}) {
-            if(!this.config.channel) return;
-            const msgId = Math.random().toString(36).substring(7);
-            this.state.lastMsgId = msgId;
+            if(!this.config.channel) {
+                this.addSystemMsg("Error: Uplink offline. Cannot send signal.");
+                return;
+            }
             const payload = { 
                 type, 
-                msgId, 
                 sender: this.config.user, 
                 time: player ? player.currentTime : 0,
                 ...data 
@@ -347,6 +388,7 @@
         handleIncomingSignal(data) {
             if (data.sender === this.config.user) return;
             
+            // Set global lock to prevent feedback loops
             this.state.isRemoteAction = true;
 
             switch(data.type) {
@@ -355,22 +397,33 @@
                     break;
                 case 'PLAY':
                     if(player) {
-                        if(Math.abs(player.currentTime - data.time) > this.state.syncThreshold) player.currentTime = data.time;
+                        const diff = Math.abs(player.currentTime - data.time);
+                        if(diff > this.state.syncThreshold) player.currentTime = data.time;
                         player.play();
                     }
                     break;
                 case 'PAUSE':
-                    if(player) { player.pause(); player.currentTime = data.time; }
+                    if(player) { 
+                        player.pause(); 
+                        player.currentTime = data.time; 
+                    }
                     break;
                 case 'SEEK':
                     if(player) player.currentTime = data.time;
                     break;
                 case 'QUERY_STATE':
-                    if(this.state.currentUrl) this.emitSignal('STATE_SYNC', { url: this.state.currentUrl, playing: this.state.isPlaying });
+                    if(this.state.currentUrl) {
+                        this.emitSignal('STATE_SYNC', { url: this.state.currentUrl, playing: this.state.isPlaying });
+                    }
                     break;
                 case 'STATE_SYNC':
                     if(!this.state.currentUrl || this.state.currentUrl !== data.url) {
                         this.loadMedia(data.url, data.time);
+                    } else {
+                        // Just sync time if already on same URL
+                        const diff = Math.abs(player.currentTime - data.time);
+                        if(diff > this.state.syncThreshold) player.currentTime = data.time;
+                        if(data.playing) player.play(); else player.pause();
                     }
                     break;
                 case 'CHAT':
@@ -378,7 +431,8 @@
                     break;
             }
 
-            setTimeout(() => { this.state.isRemoteAction = false; }, 1000);
+            // Release lock after a short delay
+            setTimeout(() => { this.state.isRemoteAction = false; }, 800);
         },
 
         loadMedia(url, startTime = 0) {
@@ -422,7 +476,11 @@
                 }
             }
 
-            player = new Plyr('#plyr-target', { autoplay: true, muted: true });
+            player = new Plyr('#plyr-target', { 
+                autoplay: true, 
+                muted: true,
+                youtube: { noCookie: true, rel: 0, showinfo: 0, iv_load_policy: 3, modestbranding: 1 }
+            });
 
             player.on('ready', () => { 
                 if(startTime > 0) player.currentTime = startTime;
