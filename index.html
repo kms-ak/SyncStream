@@ -287,7 +287,8 @@
 </div>
 
 <script>
-    // Safe initialization logic
+    let player = null;
+
     const app = {
         config: { user: '', room: '', uid: '' },
         state: {
@@ -308,8 +309,17 @@
             console.log(`[DEBUG] ${msg}`);
         },
 
+        // Helper to wait for the configuration variable
+        async awaitConfig(retries = 10) {
+            this.logDebug(`Checking for environment config... (${retries} left)`);
+            if (typeof __firebase_config !== 'undefined') return true;
+            if (retries <= 0) return false;
+            await new Promise(r => setTimeout(r, 1000));
+            return this.awaitConfig(retries - 1);
+        },
+
         async init() {
-            this.logDebug("Init triggered...");
+            this.logDebug("Initialization sequence started...");
             
             const u = document.getElementById('user-id').value.trim();
             const r = document.getElementById('room-id').value.trim().toUpperCase();
@@ -323,32 +333,41 @@
             this.config.room = r;
 
             try {
-                this.logDebug("Verifying SDK...");
+                this.logDebug("Verifying Firebase SDK...");
                 if (typeof firebase === 'undefined') {
-                    throw new Error("SDK Not Loaded. Check connection.");
+                    throw new Error("Firebase library not found in window.");
                 }
 
                 if (!this.db) {
-                    this.logDebug("Injecting Config...");
-                    // THE API KEY IS AUTOMATICALLY PROVIDED HERE BY THE ENVIRONMENT
-                    if (typeof __firebase_config === 'undefined') {
-                        throw new Error("Cloud config not found. Wait 5s and try again.");
+                    const hasConfig = await this.awaitConfig();
+                    if (!hasConfig) {
+                        throw new Error("Cloud config not found. Please refresh and wait 5s.");
                     }
+
+                    this.logDebug("Parsing Cloud Config...");
                     const firebaseConfig = JSON.parse(__firebase_config);
                     firebase.initializeApp(firebaseConfig);
                     this.db = firebase.firestore();
                     this.auth = firebase.auth();
                 }
 
-                this.logDebug("Handshaking...");
-                const cred = await this.auth.signInAnonymously();
-                this.config.uid = cred.user.uid;
+                this.logDebug("Authenticating...");
+                let cred;
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    this.logDebug("Using secure token handshake...");
+                    cred = await this.auth.signInWithCustomToken(__initial_auth_token);
+                } else {
+                    this.logDebug("Using anonymous guest handshake...");
+                    cred = await this.auth.signInAnonymously();
+                }
                 
-                this.logDebug("Uplink Established.");
+                this.config.uid = cred.user.uid;
+                this.logDebug("Cloud Uplink Established.");
+                
                 document.getElementById('auth-overlay').style.display = 'none';
                 this.startSession();
             } catch (e) {
-                this.logDebug(`FAILED: ${e.message}`);
+                this.logDebug(`ERROR: ${e.message}`);
                 console.error(e);
             }
         },
@@ -360,6 +379,7 @@
             document.getElementById('room-display').innerText = `ROOM: ${this.config.room}`;
             this.addSystemMsg(`Connected as ${this.config.user}`);
 
+            // CRITICAL PATHING: /artifacts/{appId}/public/data/rooms/{roomId}
             this.roomRef = this.db.doc(`artifacts/${appId}/public/data/rooms/${this.config.room}`);
             this.chatRef = this.db.collection(`artifacts/${appId}/public/data/rooms/${this.config.room}/chat`);
 
@@ -367,7 +387,8 @@
                 if (doc.exists) this.handleRoomUpdate(doc.data());
             }, (err) => this.addSystemMsg("Sync Error: " + err.message));
 
-            this.chatRef.orderBy('timestamp', 'desc').limit(20).onSnapshot((snap) => {
+            // Use simple query to avoid index requirement
+            this.chatRef.onSnapshot((snap) => {
                 snap.docChanges().forEach(change => {
                     if (change.type === "added") {
                         const data = change.doc.data();
@@ -381,24 +402,33 @@
 
         handleRoomUpdate(data) {
             if (data.lastSender === this.config.user) return;
+            
             if (data.url && data.url !== this.state.currentUrl) {
                 this.loadMedia(data.url, data.time || 0);
             }
+            
             if (player) {
                 this.state.isLocalAction = true;
                 const now = Date.now();
                 const latency = data.serverTime ? (now - data.serverTime) / 1000 : 0;
-                const expectedTime = data.playing ? data.time + latency : data.time;
+                const expectedTime = data.playing ? (data.time + latency) : data.time;
+                
                 document.getElementById('latency-tag').innerText = `LATENCY: ${Math.round(latency * 1000)}MS`;
+                
                 const diff = Math.abs(player.currentTime - expectedTime);
-                if (diff > 2.0) player.currentTime = expectedTime;
+                if (diff > 1.5) {
+                    player.currentTime = expectedTime;
+                }
+                
                 if (data.playing) player.play(); else player.pause();
-                setTimeout(() => { this.state.isLocalAction = false; }, 500);
+                
+                setTimeout(() => { this.state.isLocalAction = false; }, 800);
             }
         },
 
         async updateState(updates) {
             if (this.state.isLocalAction || !this.roomRef) return;
+            
             const newState = {
                 url: updates.url || this.state.currentUrl,
                 time: updates.time !== undefined ? updates.time : (player ? player.currentTime : 0),
@@ -406,7 +436,12 @@
                 lastSender: this.config.user,
                 serverTime: Date.now()
             };
-            try { await this.roomRef.set(newState, { merge: true }); } catch (e) { console.error(e); }
+            
+            try { 
+                await this.roomRef.set(newState, { merge: true }); 
+            } catch (e) { 
+                console.error("State Update Failed:", e); 
+            }
         },
 
         broadcastLoad() {
@@ -419,8 +454,10 @@
         loadMedia(url, startTime) {
             this.state.currentUrl = url;
             document.getElementById('empty-state').style.display = 'none';
+            
             const isYT = url.includes('youtube.com') || url.includes('youtu.be');
             const isDirect = /\.(mp4|m3u8|webm|ts|mkv|mov)$/i.test(url) || url.includes('brocoflix');
+            
             if (isYT || isDirect) {
                 document.getElementById('web-frame').style.display = 'none';
                 document.getElementById('player-wrapper').style.display = 'block';
@@ -434,7 +471,10 @@
         },
 
         initPlayer(url, isYT, startTime) {
-            if (player) player.destroy();
+            if (player) {
+                try { player.destroy(); } catch(e) {}
+            }
+            
             const mount = document.getElementById('player-mount');
             if (isYT) {
                 mount.innerHTML = `<div id="plyr-target" data-plyr-provider="youtube" data-plyr-embed-id="${url}"></div>`;
@@ -442,31 +482,60 @@
                 mount.innerHTML = `<video id="plyr-target" playsinline controls crossorigin muted></video>`;
                 const video = mount.querySelector('video');
                 if ((url.includes('.m3u8') || url.includes('brocoflix')) && typeof Hls !== 'undefined' && Hls.isSupported()) {
-                    const hls = new Hls(); hls.loadSource(url); hls.attachMedia(video);
-                } else { video.src = url; }
+                    const hls = new Hls(); 
+                    hls.loadSource(url); 
+                    hls.attachMedia(video);
+                } else { 
+                    video.src = url; 
+                }
             }
-            player = new Plyr('#plyr-target', { autoplay: true, muted: true });
-            player.on('ready', () => { if(startTime > 0) player.currentTime = startTime; player.play(); });
+
+            player = new Plyr('#plyr-target', { 
+                autoplay: true, 
+                muted: true,
+                youtube: { noCookie: true, rel: 0, showinfo: 0, iv_load_policy: 3 }
+            });
+
+            player.on('ready', () => { 
+                if(startTime > 0) player.currentTime = startTime; 
+                player.play(); 
+            });
+
             player.on('play', () => { 
                 this.state.isPlaying = true;
                 if(!this.state.isLocalAction) this.updateState({ playing: true }); 
             });
+
             player.on('pause', () => { 
                 this.state.isPlaying = false;
                 if(!this.state.isLocalAction) this.updateState({ playing: false }); 
+            });
+
+            player.on('seeked', () => {
+                if(!this.state.isLocalAction) this.updateState({ time: player.currentTime });
             });
         },
 
         unmuteAndSync() {
             document.getElementById('interaction-shield').style.display = 'none';
-            if (player) { player.muted = false; player.volume = 1; player.play(); }
+            if (player) { 
+                player.muted = false; 
+                player.volume = 1; 
+                player.play(); 
+            }
         },
 
         sendChat() {
             const input = document.getElementById('chat-input');
             const text = input.value.trim();
             if(!text || !this.chatRef) return;
-            this.chatRef.add({ sender: this.config.user, text, timestamp: Date.now() });
+            
+            this.chatRef.add({ 
+                sender: this.config.user, 
+                text, 
+                timestamp: Date.now() 
+            });
+            
             this.addChat(this.config.user, text);
             input.value = '';
         },
@@ -491,13 +560,13 @@
 
         toggleChat() {
             const sb = document.getElementById('sidebar');
-            sb.style.display = sb.style.display === 'none' ? 'flex' : 'none';
+            sb.style.display = (sb.style.display === 'none' || sb.style.display === '') ? 'flex' : 'none';
         }
     };
 
-    // Attach listener with extreme prejudice
+    // Attach listeners
     window.addEventListener('load', () => {
-        app.logDebug("Standby.");
+        app.logDebug("System standby. Awaiting interaction.");
         const btn = document.getElementById('init-btn');
         if (btn) {
             btn.addEventListener('click', (e) => {
