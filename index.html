@@ -303,8 +303,8 @@
             }
         },
 
-        async awaitConfig(retries = 15) {
-            this.logDebug(`Uplink attempt: ${16 - retries}/15`);
+        async awaitConfig(retries = 20) {
+            this.logDebug(`Uplink attempt: ${21 - retries}/20`);
             if (typeof __firebase_config !== 'undefined') return true;
             if (retries <= 0) return false;
             await new Promise(r => setTimeout(r, 1000));
@@ -385,7 +385,7 @@
             }
             
             // Sync player playback
-            if (player && player.ready) {
+            if (player) {
                 this.state.isLocalAction = true;
                 
                 const now = Date.now();
@@ -395,13 +395,13 @@
                 document.getElementById('latency-tag').innerText = `SYNC_OFFSET: ${Math.round(latency * 1000)}MS`;
                 
                 const diff = Math.abs(player.currentTime - expectedTime);
-                if (diff > 2) {
+                if (diff > 1.5) {
                     player.currentTime = expectedTime;
                 }
                 
                 if (data.playing) player.play(); else player.pause();
                 
-                setTimeout(() => { this.state.isLocalAction = false; }, 1000);
+                setTimeout(() => { this.state.isLocalAction = false; }, 800);
             }
         },
 
