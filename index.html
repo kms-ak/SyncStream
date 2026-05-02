@@ -71,7 +71,7 @@
         #interaction-shield {
             position: absolute;
             inset: 0;
-            background: rgba(0,0,0,0.92);
+            background: rgba(0,0,0,0.85);
             z-index: 20;
             display: flex;
             flex-direction: column;
@@ -80,6 +80,7 @@
             cursor: pointer;
             text-align: center;
             border-radius: 8px;
+            backdrop-filter: blur(4px);
         }
 
         .chat-sidebar { width: 350px; background: var(--chat-bg); border-left: 1px solid var(--border); display: flex; flex-direction: column; transition: 0.3s; }
@@ -99,7 +100,7 @@
         .btn-red { border-color: var(--error); color: var(--error); }
 
         .sync-controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; align-items: center; }
-        .mode-tag { color: var(--neon); border: 1px solid var(--neon); padding: 2px 6px; border-radius: 3px; font-size: 0.6rem; margin-right: 10px; font-weight: bold; }
+        .mode-tag { color: var(--neon); border: 1px solid var(--neon); padding: 4px 10px; border-radius: 3px; font-size: 0.65rem; margin-right: 10px; font-weight: bold; text-transform: uppercase; }
         
         #empty-state-msg {
             position: absolute;
@@ -126,8 +127,8 @@
 <header>
     <div class="logo">SYNC_STREAM // HYBRID_V5</div>
     <div style="display:flex; gap:12px; align-items:center;">
-        <div id="status-box" style="font-size:0.6rem; color:#444;">UPLINK_OFFLINE</div>
-        <button class="btn" style="padding:6px 12px; font-size:0.6rem;" onclick="app.toggleChat()">CHAT_TOGGLE</button>
+        <div id="status-box" style="font-size:0.6rem; color:#444; text-transform: uppercase;">UPLINK_OFFLINE</div>
+        <button class="btn" id="chat-toggle-btn" style="padding:6px 12px; font-size:0.6rem;" onclick="app.toggleChat()">CHAT_TOGGLE</button>
     </div>
 </header>
 
@@ -142,8 +143,8 @@
             <div id="empty-state-msg">WAITING_FOR_SIGNAL...<br><small>Paste a URL or wait for room host.</small></div>
             
             <div id="interaction-shield" onclick="app.unmute()" style="display:none;">
-                <div class="btn">ACTIVATE SESSION & AUDIO</div>
-                <p style="margin-top:15px; font-size:0.6rem; color:var(--neon); letter-spacing:1px;">SYNCING_TIMESTAMP...</p>
+                <button class="btn">ACTIVATE SESSION & AUDIO</button>
+                <p style="margin-top:15px; font-size:0.6rem; color:var(--neon); letter-spacing:1px; font-family: 'Fira Code';">SYNCING_TIMESTAMP...</p>
             </div>
             
             <div id="player-wrapper">
@@ -154,9 +155,9 @@
         </div>
 
         <div class="sync-controls" id="controls">
-            <button class="btn" id="btn-play" onclick="app.emit('PLAY')">PLAY_ALL</button>
-            <button class="btn btn-red" id="btn-pause" onclick="app.emit('PAUSE')">PAUSE_ALL</button>
-            <button class="btn" onclick="app.emit('SEEK')">SYNC_TIME</button>
+            <button class="btn" id="btn-play" onclick="app.manualEmit('PLAY')">PLAY_ALL</button>
+            <button class="btn btn-red" id="btn-pause" onclick="app.manualEmit('PAUSE')">PAUSE_ALL</button>
+            <button class="btn" onclick="app.manualEmit('SEEK')">SYNC_TIME</button>
             <div style="flex:1"></div>
             <div id="current-mode"></div>
         </div>
@@ -172,7 +173,7 @@
 </div>
 
 <script>
-    // Robust Key Handling for Ably
+    // Ably Config
     const KEYS = { ABLY: '%%ABLY_KEY%%' };
     const FALLBACK_KEY = 'j0IuLw.2D-5qA:I-0n9Rz0h6L7O5e0';
     
@@ -186,8 +187,9 @@
             channel: null, 
             url: '', 
             mode: 'IDLE', 
-            lastEmit: 0,
-            ignoreNextSignal: false
+            lastEmitTime: 0,
+            isProcessingRemoteSignal: false, // CRITICAL: Prevent feedback loops
+            targetTime: 0
         },
 
         init() {
@@ -202,10 +204,8 @@
 
         connect() {
             const key = (!KEYS.ABLY || KEYS.ABLY.startsWith('%%')) ? FALLBACK_KEY : KEYS.ABLY;
-            
             try {
                 const realtime = new Ably.Realtime({ key: key, clientId: this.state.user });
-                
                 realtime.connection.on('connected', () => {
                     this.state.channel = realtime.channels.get(`sync_${this.state.room}`);
                     document.getElementById('status-box').innerText = `UPLINK_LIVE: ${this.state.room}`;
@@ -218,25 +218,12 @@
                     this.state.channel.presence.subscribe((member) => {
                         if (member.action === 'enter') {
                             this.addSystemMsg(`${member.clientId} joined.`);
-                            // New joiner asks for current state
-                            if (member.clientId === this.state.user) {
-                                this.emit('QUERY_STATE');
-                            }
-                        } else if (member.action === 'leave') {
-                            this.addSystemMsg(`${member.clientId} left.`);
+                            if (member.clientId === this.state.user) this.manualEmit('QUERY_STATE');
                         }
                     });
-
                     this.state.channel.presence.enter();
                 });
-
-                realtime.connection.on('failed', () => {
-                    document.getElementById('status-box').innerText = "CONNECTION_FAILED";
-                });
-            } catch (e) {
-                console.error("Ably Init Error", e);
-                document.getElementById('status-box').innerText = "UPLINK_ERROR";
-            }
+            } catch (e) { console.error(e); }
         },
 
         toggleChat() { document.getElementById('chat-sidebar').classList.toggle('collapsed'); },
@@ -244,7 +231,10 @@
         unmute() {
             if (player) {
                 player.muted = false;
-                player.play().catch(e => console.warn("Unmute play blocked", e));
+                player.volume = 1;
+                // Sync to room time if it exists
+                if(this.state.targetTime > 0) player.currentTime = this.state.targetTime;
+                player.play().catch(() => {});
             }
             document.getElementById('interaction-shield').style.display = 'none';
         },
@@ -253,19 +243,19 @@
             const val = document.getElementById('media-url').value.trim();
             if(val) {
                 this.load(val); 
-                this.emit('LOAD', val);
+                this.manualEmit('LOAD', val);
             }
         },
 
         load(url, time = 0) {
             if (!url) return;
-            
             if (url === this.state.url && this.state.mode !== 'IDLE') {
                 if(time > 0 && player) player.currentTime = time;
                 return;
             }
 
             this.state.url = url;
+            this.state.targetTime = time;
             const isDirect = /\.(mp4|m3u8|webm|ts|ogv|m4v)(\?.*)?$/i.test(url);
             const isYT = url.includes('youtube.com') || url.includes('youtu.be');
             
@@ -277,22 +267,15 @@
                 modeTag.innerHTML = `<span class="mode-tag">MEDIA_SYNC</span>`;
                 document.getElementById('web-frame').style.display = 'none';
                 document.getElementById('player-wrapper').style.display = 'block';
-                document.getElementById('btn-play').style.display = 'inline-block';
-                document.getElementById('btn-pause').style.display = 'inline-block';
                 this.setupPlayer(url, isYT, time);
             } else {
                 this.state.mode = 'WEB';
-                modeTag.innerHTML = `<span class="mode-tag" style="color:orange; border-color:orange;">WEB_VIEW</span>`;
+                modeTag.innerHTML = `<span class="mode-tag" style="color:#ffcc00; border-color:#ffcc00;">WEB_VIEW</span>`;
                 document.getElementById('player-wrapper').style.display = 'none';
                 document.getElementById('web-frame').style.display = 'block';
                 document.getElementById('web-frame').src = url;
-                document.getElementById('btn-play').style.display = 'none';
-                document.getElementById('btn-pause').style.display = 'none';
                 document.getElementById('interaction-shield').style.display = 'none';
-                if(player) {
-                    player.destroy();
-                    player = null;
-                }
+                if(player) { player.destroy(); player = null; }
             }
         },
 
@@ -311,40 +294,34 @@
                 mount.innerHTML = `<video playsinline controls autoplay muted crossorigin></video>`;
                 const v = mount.querySelector('video');
                 if (url.includes('.m3u8') && Hls.isSupported()) {
-                    hls = new Hls();
-                    hls.loadSource(url);
-                    hls.attachMedia(v);
+                    hls = new Hls(); hls.loadSource(url); hls.attachMedia(v);
                 } else { v.src = url; }
                 player = new Plyr(v, { autoplay: true, muted: true });
             }
 
-            // BIDIRECTIONAL CONTROL: Bind player events to emit signals
-            player.on('play', () => {
-                if(!this.state.ignoreNextSignal) this.emit('PLAY');
-                this.state.ignoreNextSignal = false;
-            });
-            
-            player.on('pause', () => {
-                if(!this.state.ignoreNextSignal) this.emit('PAUSE');
-                this.state.ignoreNextSignal = false;
-            });
-
-            player.on('seeked', () => {
-                if(!this.state.ignoreNextSignal) this.emit('SEEK');
-                this.state.ignoreNextSignal = false;
-            });
+            // Bidirectional Listener
+            player.on('play', () => this.handleLocalEvent('PLAY'));
+            player.on('pause', () => this.handleLocalEvent('PAUSE'));
+            player.on('seeked', () => this.handleLocalEvent('SEEK'));
 
             player.on('ready', () => { 
                 if(time > 0) player.currentTime = time; 
             });
         },
 
-        emit(type, payload = null) {
+        handleLocalEvent(type) {
+            // Only emit if we AREN'T currently reacting to a remote signal
+            if (this.state.isProcessingRemoteSignal) return;
+            this.manualEmit(type);
+        },
+
+        manualEmit(type, payload = null) {
             if (!this.state.channel) return;
             
+            // Throttle seeks
             const now = Date.now();
-            if(now - this.state.lastEmit < 300 && type === 'SEEK') return;
-            this.state.lastEmit = now;
+            if(now - this.state.lastEmitTime < 400 && type === 'SEEK') return;
+            this.state.lastEmitTime = now;
 
             const data = {
                 type, 
@@ -359,10 +336,10 @@
 
         handleSignal(data) {
             if(data.type === 'CHAT') return this.addChat(data.user, data.msg);
-            if(data.user === this.state.user) return;
+            if(data.user === this.state.user) return; // Ignore own echoes from Ably
 
-            // Flag to prevent internal player events from triggering a re-emit
-            this.state.ignoreNextSignal = true;
+            // Block local events from triggering a recursive loop
+            this.state.isProcessingRemoteSignal = true;
 
             switch(data.type) {
                 case 'LOAD': 
@@ -384,21 +361,22 @@
                     if(player) player.currentTime = data.time; 
                     break;
                 case 'QUERY_STATE': 
-                    if(this.state.url) this.emit('STATE_DATA'); 
+                    if(this.state.url) this.manualEmit('STATE_DATA'); 
                     break;
                 case 'STATE_DATA': 
-                    if(!this.state.url || Math.abs(player.currentTime - data.time) > 5) {
-                        this.load(data.url, data.time);
-                    }
+                    if(!this.state.url) this.load(data.url, data.time);
                     break;
             }
+
+            // Reset loop-prevention flag after a short delay to allow UI to settle
+            setTimeout(() => { this.state.isProcessingRemoteSignal = false; }, 200);
         },
 
         sendChat() {
             const input = document.getElementById('chat-input');
             const msg = input.value.trim();
             if(!msg) return;
-            this.emit('CHAT', msg);
+            this.manualEmit('CHAT', msg);
             input.value = '';
         },
 
